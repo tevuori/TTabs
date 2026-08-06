@@ -86,17 +86,25 @@ function similarity(a: string, b: string): number {
   return 1 - dist / maxLen;
 }
 
-// Align LRC lines to parsed tab lines.
+// Align LRC lines to parsed tab lines using Dynamic Time Warping (DP).
 //
-// Strategy: for each LRC line with non-empty text, find the best-matching
-// "lyric" or "chord"-type ParsedLine (chord lines carry the lyric text in
-// their non-chord segments). We enforce monotonic ordering — once a tab line
-// is matched, subsequent LRC lines can only match later tab lines — which
-// prevents the same lyric from matching multiple times across repeats.
+// The previous greedy approach used a strict monotonic cursor — once a tab
+// line was matched, it could never be matched again. This caused problems
+// with repeated sections (e.g. a chorus that appears twice): if lines in
+// between failed to match, the cursor wouldn't advance, and subsequent LRC
+// lines would jump ahead to match later tab lines, skipping entire verses.
 //
-// Returns a list of { lineIndex, time } sorted by time, one per matched LRC
-// line. Unmatched LRC lines (instrumental gaps, spoken interludes) are
-// skipped.
+// The DP approach finds the globally optimal alignment by considering all
+// possible paths through the LRC×candidate matrix. It allows:
+//   - Match: LRC line matches a candidate, both advance (normal case)
+//   - Repeat: LRC line matches the current candidate again, LRC advances
+//     only (for repeated sections where the tab has lyrics once)
+//   - Skip LRC: LRC line doesn't match anything, LRC advances only
+//     (instrumental gaps, spoken interludes)
+//   - Skip candidate: tab line not in the LRC, candidate advances only
+//
+// After alignment, gaps are filled by interpolating line indices so the
+// scroll moves smoothly through unmatched sections instead of jumping.
 export function alignLyrics(
   lrcLines: LrcLine[],
   parsedLines: ParsedLine[]
@@ -119,35 +127,151 @@ export function alignLyrics(
 
   if (candidates.length === 0) return [];
 
+  // Filter to non-empty LRC lines (keep track of original time).
+  const lrcItems = lrcLines.filter(l => l.text.trim());
+  if (lrcItems.length === 0) return [];
+
+  const n = lrcItems.length;
+  const m = candidates.length;
   const SIM_THRESHOLD = 0.45;
-  const alignments: LyricAlignment[] = [];
-  let searchStart = 0; // monotonic cursor into candidates
+  const SKIP_PENALTY = -0.1;   // penalty for skipping a line (LRC or candidate)
+  const REPEAT_FACTOR = 0.5;   // repeat matches score lower than first-time matches
+  const NEG_INF = -1e9;
 
-  for (const lrc of lrcLines) {
-    if (!lrc.text.trim()) continue; // skip empty LRC lines
-
-    let bestIdx = -1;
-    let bestScore = SIM_THRESHOLD;
-    let bestCandidateIdx = searchStart;
-
-    for (let c = searchStart; c < candidates.length; c++) {
-      const score = similarity(lrc.text, candidates[c].text);
-      if (score > bestScore) {
-        bestScore = score;
-        bestIdx = candidates[c].index;
-        bestCandidateIdx = c;
-      }
-    }
-
-    if (bestIdx >= 0) {
-      alignments.push({ lineIndex: bestIdx, time: lrc.time });
-      // Advance the cursor past this candidate so future LRC lines only
-      // match later tab lines.
-      searchStart = bestCandidateIdx + 1;
+  // Build similarity matrix.
+  const sim: number[][] = [];
+  for (let i = 0; i < n; i++) {
+    sim[i] = [];
+    for (let j = 0; j < m; j++) {
+      sim[i][j] = similarity(lrcItems[i].text, candidates[j].text);
     }
   }
 
-  return alignments;
+  // DP table: dp[i][j] = best score aligning lrcItems[0..i-1] with
+  // candidates[0..j-1].
+  const dp: number[][] = Array.from({ length: n + 1 }, () =>
+    new Array(m + 1).fill(NEG_INF)
+  );
+  // Back pointers: 0 = match, 1 = repeat/skip-lrc, 2 = skip-candidate
+  const back: number[][] = Array.from({ length: n + 1 }, () =>
+    new Array(m + 1).fill(-1)
+  );
+
+  dp[0][0] = 0;
+  for (let j = 1; j <= m; j++) {
+    dp[0][j] = dp[0][j - 1] + SKIP_PENALTY;
+    back[0][j] = 2;
+  }
+  for (let i = 1; i <= n; i++) {
+    dp[i][0] = dp[i - 1][0] + SKIP_PENALTY;
+    back[i][0] = 1;
+  }
+
+  for (let i = 1; i <= n; i++) {
+    for (let j = 1; j <= m; j++) {
+      const s = sim[i - 1][j - 1];
+      const isMatch = s > SIM_THRESHOLD;
+
+      // Option 0: Match — from (i-1, j-1), advance both.
+      if (isMatch) {
+        const score = dp[i - 1][j - 1] + s;
+        if (score > dp[i][j]) {
+          dp[i][j] = score;
+          back[i][j] = 0;
+        }
+      }
+
+      // Option 1: Repeat or skip LRC — from (i-1, j), advance LRC only.
+      // If the LRC line matches the current candidate, it's a repeat
+      // (same tab line sung again). Otherwise it's a skip.
+      {
+        const score = dp[i - 1][j] + (isMatch ? s * REPEAT_FACTOR : SKIP_PENALTY);
+        if (score > dp[i][j]) {
+          dp[i][j] = score;
+          back[i][j] = 1;
+        }
+      }
+
+      // Option 2: Skip candidate — from (i, j-1), advance candidate only.
+      {
+        const score = dp[i][j - 1] + SKIP_PENALTY;
+        if (score > dp[i][j]) {
+          dp[i][j] = score;
+          back[i][j] = 2;
+        }
+      }
+    }
+  }
+
+  // Find the best endpoint: max dp[n][j] for any j.
+  let bestJ = 0;
+  let bestScore = dp[n][0];
+  for (let j = 1; j <= m; j++) {
+    if (dp[n][j] > bestScore) {
+      bestScore = dp[n][j];
+      bestJ = j;
+    }
+  }
+
+  // Traceback to extract matched pairs.
+  const matches: { lrcIdx: number; candIdx: number }[] = [];
+  let i = n, j = bestJ;
+  while (i > 0 || j > 0) {
+    const transition = back[i][j];
+    if (transition === 0) {
+      // Match: LRC i-1 → candidate j-1
+      matches.push({ lrcIdx: i - 1, candIdx: j - 1 });
+      i--; j--;
+    } else if (transition === 1) {
+      // Repeat or skip LRC
+      if (j > 0 && sim[i - 1][j - 1] > SIM_THRESHOLD) {
+        // Repeat: LRC i-1 → candidate j-1 (again)
+        matches.push({ lrcIdx: i - 1, candIdx: j - 1 });
+      }
+      i--;
+    } else if (transition === 2) {
+      // Skip candidate
+      j--;
+    }
+  }
+  matches.reverse();
+
+  // Convert to LyricAlignment[].
+  const alignments: LyricAlignment[] = matches.map(m => ({
+    lineIndex: candidates[m.candIdx].index,
+    time: lrcItems[m.lrcIdx].time,
+  }));
+
+  // Fill gaps: between consecutive alignments, if there are skipped tab
+  // lines, interpolate their times so the scroll moves smoothly instead
+  // of jumping over entire sections.
+  return fillGaps(alignments);
+}
+
+// Fill gaps in the alignment by interpolating line indices between
+// consecutive matched alignments. This ensures the scroll moves through
+// all tab lines even when some lines weren't directly matched to LRC
+// timestamps (e.g. instrumental sections, failed matches).
+function fillGaps(alignments: LyricAlignment[]): LyricAlignment[] {
+  if (alignments.length < 2) return alignments;
+
+  const result: LyricAlignment[] = [alignments[0]];
+  for (let i = 1; i < alignments.length; i++) {
+    const prev = alignments[i - 1];
+    const curr = alignments[i];
+    const lineGap = curr.lineIndex - prev.lineIndex;
+    const timeGap = curr.time - prev.time;
+
+    if (lineGap > 1 && timeGap > 0) {
+      // Interpolate intermediate lines, distributing the time gap evenly.
+      for (let k = 1; k < lineGap; k++) {
+        const t = prev.time + (timeGap * k) / lineGap;
+        result.push({ lineIndex: prev.lineIndex + k, time: t });
+      }
+    }
+    result.push(curr);
+  }
+  return result;
 }
 
 // Given the alignment and a current playback time (seconds), return the index
