@@ -11,6 +11,7 @@ import { BackingTrack, type BackingLayer } from "@/lib/backing-track";
 import { parseLrc, alignLyrics, lineAtTime, type LyricAlignment } from "@/lib/lyrics";
 import { saveSong, saveSongState, getSongState, deleteSongState } from "@/lib/storage";
 import { buildShareableUrl } from "@/lib/share";
+import { IS_MOBILE } from "@/lib/app-mode";
 import ChordToken from "./ChordToken";
 import ChordDiagram from "./ChordDiagram";
 import TransposeControls from "./TransposeControls";
@@ -127,7 +128,13 @@ export default function SongViewer({ song, isSaved, onSaveToggle, initialState }
   const parsedLines = useMemo(() => parseTabContent(song.content), [song.content]);
 
   // Fetch synced lyrics from LRCLib when the song loads.
+  // In mobile mode there is no server, so skip the fetch entirely.
   useEffect(() => {
+    if (IS_MOBILE) {
+      setLyricsStatus("none");
+      setLyricsAlignments([]);
+      return;
+    }
     setLyricsStatus("fetching");
     setLyricsAlignments([]);
     setSyncScroll(false);
@@ -945,8 +952,8 @@ export default function SongViewer({ song, isSaved, onSaveToggle, initialState }
             <span className="text-text-muted text-xs font-mono min-w-[24px] text-center">{scrollSpeed}x</span>
           </div>
 
-          {/* Synced-lyrics scroll */}
-          {lyricsStatus === "found" && (
+          {/* Synced-lyrics scroll — not available in mobile (offline) mode */}
+          {!IS_MOBILE && lyricsStatus === "found" && (
             <div className="flex items-center gap-2 bg-bg-card border border-bg-border rounded-xl p-1.5">
               <button
                 onClick={handleToggleSync}
@@ -1001,7 +1008,7 @@ export default function SongViewer({ song, isSaved, onSaveToggle, initialState }
               )}
             </div>
           )}
-          {(lyricsStatus === "fetching" || lyricsStatus === "none" || lyricsStatus === "error") && (
+          {!IS_MOBILE && (lyricsStatus === "fetching" || lyricsStatus === "none" || lyricsStatus === "error") && (
             <div className="flex items-center gap-1.5 px-2 py-1 text-text-dim text-xs" title={
               lyricsStatus === "fetching" ? "Searching LRCLib for synced lyrics..." :
               lyricsStatus === "none" ? "No synced lyrics found for this song" :
@@ -1175,16 +1182,18 @@ export default function SongViewer({ song, isSaved, onSaveToggle, initialState }
         </div>
       </div>
 
-      {/* YouTube sync + section looping */}
-      <div className="mb-4 print:hidden">
-        <YouTubePlayer
-          query={`${song.artistName} ${song.songName}`}
-          onTimeUpdate={(time) => {
-            ytTimeRef.current = time;
-            setYtClockActive(time !== null);
-          }}
-        />
-      </div>
+      {/* YouTube sync + section looping — not available in mobile (offline) mode */}
+      {!IS_MOBILE && (
+        <div className="mb-4 print:hidden">
+          <YouTubePlayer
+            query={`${song.artistName} ${song.songName}`}
+            onTimeUpdate={(time) => {
+              ytTimeRef.current = time;
+              setYtClockActive(time !== null);
+            }}
+          />
+        </div>
+      )}
 
       {/* Chord summary — all unique chords with diagrams */}
       {showAllChords && uniqueChords.length > 0 && (

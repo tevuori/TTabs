@@ -13,8 +13,24 @@ import {
 } from "@/lib/auth";
 import { AuthGuard, useRequireAuth } from "@/components/AuthGuard";
 import Header from "@/components/Header";
+import { IS_MOBILE } from "@/lib/app-mode";
 
 export default function SettingsPage() {
+  const router = useRouter();
+
+  // In mobile mode there is no user management — redirect home.
+  useEffect(() => {
+    if (IS_MOBILE) router.replace("/");
+  }, [router]);
+
+  if (IS_MOBILE) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-bg">
+        <div className="w-8 h-8 border-2 border-bg-border border-t-accent rounded-full animate-spin" />
+      </div>
+    );
+  }
+
   return (
     <AuthGuard>
       <SettingsContent />

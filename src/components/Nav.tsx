@@ -1,20 +1,33 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useRouter, usePathname } from "next/navigation";
+import { IS_MOBILE } from "@/lib/app-mode";
 
 interface NavItem {
   label: string;
   href: string;
 }
 
-const NAV_ITEMS: NavItem[] = [
+const SERVER_NAV_ITEMS: NavItem[] = [
   { label: "Search", href: "/" },
   { label: "Library", href: "/library" },
   { label: "Chords", href: "/chords" },
   { label: "Capo", href: "/capo" },
   { label: "Setlists", href: "/setlists" },
+  { label: "Sync", href: "/sync" },
   { label: "Settings", href: "/settings" },
+];
+
+// Mobile mode: no Search (offline), no Settings (no user management).
+// Sync is the primary way to get data onto the device.
+const MOBILE_NAV_ITEMS: NavItem[] = [
+  { label: "Home", href: "/" },
+  { label: "Library", href: "/library" },
+  { label: "Chords", href: "/chords" },
+  { label: "Capo", href: "/capo" },
+  { label: "Setlists", href: "/setlists" },
+  { label: "Sync", href: "/sync" },
 ];
 
 // Shared responsive navigation bar.
@@ -24,6 +37,7 @@ export default function Nav() {
   const router = useRouter();
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
+  const navItems = useMemo(() => (IS_MOBILE ? MOBILE_NAV_ITEMS : SERVER_NAV_ITEMS), []);
 
   // Close the mobile menu on route change.
   useEffect(() => {
@@ -39,7 +53,7 @@ export default function Nav() {
     <nav className="flex items-center gap-1">
       {/* Desktop nav — hidden on small screens */}
       <div className="hidden sm:flex items-center gap-1">
-        {NAV_ITEMS.map(item => (
+        {navItems.map(item => (
           <button
             key={item.href}
             onClick={() => navigate(item.href)}
@@ -76,7 +90,7 @@ export default function Nav() {
       {open && (
         <div className="sm:hidden absolute top-full left-0 right-0 bg-bg-card border-b border-bg-border shadow-lg z-50">
           <div className="px-4 py-2 flex flex-col gap-0.5">
-            {NAV_ITEMS.map(item => (
+            {navItems.map(item => (
               <button
                 key={item.href}
                 onClick={() => navigate(item.href)}

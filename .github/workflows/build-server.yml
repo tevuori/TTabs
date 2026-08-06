@@ -1,0 +1,40 @@
+name: Server build check
+
+# CI guard: confirms the server build (Vercel deploy target) isn't broken
+# by the mobile-mode branching. Vercel auto-deploys via its own integration;
+# this workflow just verifies the build succeeds.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build-server:
+    name: Build server (Vercel target)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Build server
+        run: npm run build:server
+        env:
+          # The server build needs MONGODB_URI to be present at build time
+          # for the mongo.ts module to compile. Use a dummy value — it's
+          # only validated at runtime, not build time.
+          MONGODB_URI: mongodb://dummy:dummy@localhost:27017/dummy

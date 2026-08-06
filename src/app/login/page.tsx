@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { login, getSession, validateSession } from "@/lib/auth";
+import { IS_MOBILE } from "@/lib/app-mode";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -11,6 +12,13 @@ export default function LoginPage() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [checking, setChecking] = useState(true);
+
+  // In mobile mode there is no login — redirect home immediately.
+  useEffect(() => {
+    if (IS_MOBILE) {
+      router.replace("/");
+    }
+  }, [router]);
 
   // If already logged in (validated server-side), redirect to home.
   // Don't trust localStorage alone — validate before redirecting to avoid

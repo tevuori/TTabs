@@ -29,3 +29,9 @@ yarn-error.log*
 next-env.d.ts
 .env.local
 .env*
+
+# android build outputs (the android/ project itself IS committed)
+/android/app/build
+/android/.gradle
+/android/captures
+/android/local.properties

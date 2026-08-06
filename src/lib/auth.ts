@@ -1,6 +1,12 @@
 // Client-side authentication for TTabs.
 // Sessions are stored in localStorage (token + user info) and validated
 // server-side against MongoDB on every API call.
+//
+// In mobile mode (NEXT_PUBLIC_APP_MODE=mobile) there is no server, so all
+// functions here short-circuit: getSession returns a synthetic local session,
+// login/logout/validate are no-ops, and user-management functions throw.
+
+import { IS_MOBILE } from "./app-mode";
 
 export interface User {
   id: string;
@@ -22,7 +28,18 @@ const SESSION_KEY = "ttabs_session";
 // Get the stored session from localStorage (no server validation).
 // Returns null if the session is expired or missing a token field
 // (e.g. stale sessions from the old IndexedDB-based auth).
+//
+// In mobile mode, returns a synthetic local session (no localStorage).
 export function getSession(): Session | null {
+  if (IS_MOBILE) {
+    return {
+      token: "local",
+      userId: "local",
+      username: "Local",
+      isAdmin: false,
+      expiresAt: Number.MAX_SAFE_INTEGER,
+    };
+  }
   if (typeof window === "undefined") return null;
   const raw = localStorage.getItem(SESSION_KEY);
   if (!raw) return null;
@@ -49,7 +66,9 @@ export function getToken(): string | null {
 }
 
 // Login via the API. Returns the session on success, null on bad credentials.
+// In mobile mode this is a no-op (no auth).
 export async function login(username: string, password: string): Promise<Session | null> {
+  if (IS_MOBILE) return getSession();
   const resp = await fetch("/api/auth/login", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -69,7 +88,9 @@ export async function login(username: string, password: string): Promise<Session
 }
 
 // Logout via the API (invalidates the server-side session) + clear localStorage.
+// In mobile mode this is a no-op.
 export async function logout(): Promise<void> {
+  if (IS_MOBILE) return;
   const token = getToken();
   if (token) {
     await fetch("/api/auth/logout", {
@@ -82,7 +103,9 @@ export async function logout(): Promise<void> {
 
 // Validate the current session against the server.
 // Returns true if the session is still valid.
+// In mobile mode there is no server, so always valid.
 export async function validateSession(): Promise<boolean> {
+  if (IS_MOBILE) return true;
   const token = getToken();
   if (!token) return false;
   try {
@@ -100,8 +123,10 @@ export async function validateSession(): Promise<boolean> {
 }
 
 // --- User management (admin only) ---
+// Not available in mobile mode (no server, no user management).
 
 export async function getAllUsers(): Promise<User[]> {
+  if (IS_MOBILE) return [];
   const token = getToken();
   if (!token) throw new Error("Not authenticated");
   const resp = await fetch("/api/auth/users", {
@@ -113,6 +138,7 @@ export async function getAllUsers(): Promise<User[]> {
 }
 
 export async function addUser(username: string, password: string, isAdmin: boolean = false): Promise<User> {
+  if (IS_MOBILE) throw new Error("User management is not available in mobile mode");
   const token = getToken();
   if (!token) throw new Error("Not authenticated");
   const resp = await fetch("/api/auth/users", {
@@ -129,6 +155,7 @@ export async function addUser(username: string, password: string, isAdmin: boole
 }
 
 export async function deleteUser(id: string): Promise<void> {
+  if (IS_MOBILE) return;
   const token = getToken();
   if (!token) throw new Error("Not authenticated");
   const resp = await fetch(`/api/auth/users/${id}`, {
@@ -142,6 +169,7 @@ export async function deleteUser(id: string): Promise<void> {
 }
 
 export async function changePassword(id: string, newPassword: string): Promise<void> {
+  if (IS_MOBILE) return;
   const token = getToken();
   if (!token) throw new Error("Not authenticated");
   const resp = await fetch(`/api/auth/users/${id}`, {

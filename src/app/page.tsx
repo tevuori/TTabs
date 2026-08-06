@@ -8,8 +8,26 @@ import SearchResults from "@/components/SearchResults";
 import RecentSongs from "@/components/RecentSongs";
 import Header from "@/components/Header";
 import { AuthGuard } from "@/components/AuthGuard";
+import { IS_MOBILE } from "@/lib/app-mode";
 
 export default function HomePage() {
+  if (IS_MOBILE) {
+    return (
+      <AuthGuard>
+        <MobileHome />
+      </AuthGuard>
+    );
+  }
+  return (
+    <AuthGuard>
+      <ServerHome />
+    </AuthGuard>
+  );
+}
+
+// --- Server home: search across UG and Songsterr ---
+
+function ServerHome() {
   const router = useRouter();
   const [results, setResults] = useState<SearchResult[]>([]);
   const [loading, setLoading] = useState(false);
@@ -66,7 +84,6 @@ export default function HomePage() {
   );
 
   return (
-    <AuthGuard>
     <div className="min-h-screen flex flex-col">
       <Header />
 
@@ -123,6 +140,81 @@ export default function HomePage() {
         </div>
       </footer>
     </div>
-    </AuthGuard>
+  );
+}
+
+// --- Mobile home: offline, sync-focused ---
+
+function MobileHome() {
+  const router = useRouter();
+
+  return (
+    <div className="min-h-screen flex flex-col">
+      <Header />
+
+      <main className="flex-1 flex flex-col items-center px-4 py-8 sm:py-12">
+        <div className="text-center mb-8">
+          <h1 className="text-3xl sm:text-4xl font-bold text-text mb-3">
+            TTabs
+          </h1>
+          <p className="text-text-muted text-base sm:text-lg">
+            Your offline guitar tab library
+          </p>
+        </div>
+
+        {/* Sync CTA */}
+        <div className="w-full max-w-md mb-8">
+          <button
+            onClick={() => router.push("/sync")}
+            className="w-full p-6 bg-bg-card border border-bg-border rounded-2xl hover:border-accent transition-colors text-left"
+          >
+            <div className="flex items-center gap-4">
+              <div className="w-12 h-12 bg-accent/15 rounded-xl flex items-center justify-center flex-shrink-0">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
+                  <path d="M12 4V12M12 12L8 8M12 12L16 8M4 16V18C4 19.1 4.9 20 6 20H18C19.1 20 20 19.1 20 18V16" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-accent" />
+                </svg>
+              </div>
+              <div>
+                <div className="text-text font-semibold text-base">Sync data</div>
+                <div className="text-text-muted text-sm">
+                  Transfer songs &amp; setlists via QR code
+                </div>
+              </div>
+            </div>
+          </button>
+        </div>
+
+        {/* Library shortcut */}
+        <div className="w-full max-w-md mb-4">
+          <button
+            onClick={() => router.push("/library")}
+            className="w-full p-5 bg-bg-card border border-bg-border rounded-2xl hover:border-accent transition-colors text-left"
+          >
+            <div className="flex items-center gap-4">
+              <div className="w-10 h-10 bg-bg-hover rounded-xl flex items-center justify-center flex-shrink-0">
+                <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
+                  <path d="M4 5H16M4 10H16M4 15H11" stroke="currentColor" strokeWidth="2" strokeLinecap="round" className="text-text-muted" />
+                </svg>
+              </div>
+              <div>
+                <div className="text-text font-medium text-sm">Library</div>
+                <div className="text-text-muted text-xs">Browse your saved songs</div>
+              </div>
+            </div>
+          </button>
+        </div>
+
+        {/* Recent songs */}
+        <div className="w-full">
+          <RecentSongs />
+        </div>
+      </main>
+
+      <footer className="border-t border-bg-border py-4">
+        <div className="max-w-6xl mx-auto px-4 text-center text-text-dim text-xs">
+          TTabs — Offline guitar tabs
+        </div>
+      </footer>
+    </div>
   );
 }
