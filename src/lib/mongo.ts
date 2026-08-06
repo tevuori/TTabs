@@ -3,9 +3,7 @@
 
 import { MongoClient, Db } from "mongodb";
 
-const MONGODB_URI =
-  process.env.MONGODB_URI ||
-  "mongodb+srv://tevuori:GAy8DDmyyJkBr9ue@cluster0.cc3xmh4.mongodb.net/?retryWrites=true&w=majority";
+const MONGODB_URI = process.env.MONGODB_URI;
 const MONGODB_DB = process.env.MONGODB_DB || "ttabs";
 
 // Cache the connection across hot reloads in dev.
@@ -16,7 +14,14 @@ export async function getDb(): Promise<Db> {
   if (cachedClient && cachedDb) {
     return cachedDb;
   }
-  const client = new MongoClient(MONGODB_URI);
+  if (!MONGODB_URI) {
+    throw new Error("MONGODB_URI environment variable is not set");
+  }
+  const client = new MongoClient(MONGODB_URI, {
+    serverSelectionTimeoutMS: 10000,
+    connectTimeoutMS: 10000,
+    socketTimeoutMS: 30000,
+  });
   await client.connect();
   cachedClient = client;
   cachedDb = client.db(MONGODB_DB);
@@ -38,13 +43,17 @@ async function ensureIndexes(db: Db): Promise<void> {
   await db.collection("setlists").createIndex({ userId: 1, id: 1 }, { unique: true });
 }
 
-// Admin credentials — seeded on first connect.
-const ADMIN_USERNAME = "tevuori";
-const ADMIN_PASSWORD = "agent00754";
+// Admin credentials — seeded on first connect. Configured via env vars.
+const ADMIN_USERNAME = process.env.ADMIN_USERNAME || "tevuori";
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD;
 
 async function seedAdmin(db: Db): Promise<void> {
   const count = await db.collection("users").countDocuments();
   if (count > 0) return;
+  if (!ADMIN_PASSWORD) {
+    console.warn("ADMIN_PASSWORD not set — skipping admin user seed");
+    return;
+  }
   const { salt, hash } = hashPassword(ADMIN_PASSWORD);
   await db.collection("users").insertOne({
     id: "admin",
