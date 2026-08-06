@@ -7,6 +7,7 @@ import { getSong, isSongSaved, saveSong, deleteSong } from "@/lib/storage";
 import { addRecentSong } from "@/lib/recent";
 import { decodeStateFromQuery } from "@/lib/share";
 import SongViewer from "@/components/SongViewer";
+import Header from "@/components/Header";
 import { AuthGuard } from "@/components/AuthGuard";
 
 export default function SongPage({ params }: { params: Promise<{ id: string }> }) {
@@ -97,39 +98,7 @@ export default function SongPage({ params }: { params: Promise<{ id: string }> }
   return (
     <AuthGuard>
       <div className="min-h-screen">
-        <header className="border-b border-bg-border sticky top-0 bg-bg/90 backdrop-blur-sm z-40">
-        <div className="max-w-6xl mx-auto px-4 py-3 flex items-center justify-between">
-          <button
-            onClick={() => router.push("/")}
-            className="flex items-center gap-2 text-text-muted hover:text-accent transition-colors text-sm font-medium"
-          >
-            <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-              <path d="M10 3L5 8L10 13" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-            </svg>
-            Back to Search
-          </button>
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => router.push("/library")}
-              className="px-3 py-1.5 text-sm font-medium text-text-muted hover:text-accent transition-colors"
-            >
-              Library
-            </button>
-            <button
-              onClick={() => router.push("/setlists")}
-              className="px-3 py-1.5 text-sm font-medium text-text-muted hover:text-accent transition-colors"
-            >
-              Setlists
-            </button>
-            <button
-              onClick={() => router.push("/settings")}
-              className="px-3 py-1.5 text-sm font-medium text-text-muted hover:text-accent transition-colors"
-            >
-              Settings
-            </button>
-          </div>
-        </div>
-      </header>
+        <Header />
 
         <SongViewer
           song={song}

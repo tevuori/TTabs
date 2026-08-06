@@ -16,6 +16,7 @@ import {
   Setlist,
 } from "@/lib/storage";
 import { AuthGuard } from "@/components/AuthGuard";
+import Header from "@/components/Header";
 
 export default function SetlistsPage() {
   const router = useRouter();
@@ -124,26 +125,7 @@ export default function SetlistsPage() {
   return (
     <AuthGuard>
       <div className="min-h-screen flex flex-col">
-        <header className="border-b border-bg-border">
-        <div className="max-w-6xl mx-auto px-4 py-4 flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <div className="w-8 h-8 bg-accent rounded-lg flex items-center justify-center">
-              <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
-                <path d="M5 3V15M9 3V15M13 3V15M3 6H15M3 10H15" stroke="white" strokeWidth="1.5" strokeLinecap="round" />
-              </svg>
-            </div>
-            <span className="text-xl font-bold text-text">TTabs</span>
-          </div>
-          <nav className="flex items-center gap-1">
-            <button onClick={() => router.push("/")} className="px-3 py-1.5 text-sm font-medium text-text-muted hover:text-accent transition-colors">Search</button>
-            <button onClick={() => router.push("/library")} className="px-3 py-1.5 text-sm font-medium text-text-muted hover:text-accent transition-colors">Library</button>
-            <button onClick={() => router.push("/chords")} className="px-3 py-1.5 text-sm font-medium text-text-muted hover:text-accent transition-colors">Chords</button>
-            <button onClick={() => router.push("/capo")} className="px-3 py-1.5 text-sm font-medium text-text-muted hover:text-accent transition-colors">Capo</button>
-            <button onClick={() => router.push("/setlists")} className="px-3 py-1.5 text-sm font-medium text-text hover:text-accent transition-colors">Setlists</button>
-            <button onClick={() => router.push("/settings")} className="px-3 py-1.5 text-sm font-medium text-text-muted hover:text-accent transition-colors">Settings</button>
-          </nav>
-        </div>
-      </header>
+        <Header />
 
       <main className="flex-1 max-w-5xl mx-auto w-full px-4 py-8">
         <h1 className="text-2xl font-bold text-text mb-2">Setlists</h1>
@@ -152,7 +134,7 @@ export default function SetlistsPage() {
         </p>
 
         {/* Create new setlist */}
-        <div className="flex gap-2 mb-6">
+        <div className="flex flex-col sm:flex-row gap-2 mb-6">
           <input
             type="text"
             value={newName}
@@ -254,7 +236,7 @@ export default function SetlistsPage() {
                 </div>
               ) : (
                 <div>
-                  <div className="flex items-center justify-between mb-4">
+                  <div className="flex items-center justify-between gap-2 mb-4">
                     <h2 className="text-text font-bold text-lg">{activeSetlist.name}</h2>
                     <button
                       onClick={() => setShowAddSongs(s => !s)}
@@ -306,7 +288,7 @@ export default function SetlistsPage() {
                       {setlistSongs.map((song, idx) => (
                         <div
                           key={song.id}
-                          className="group flex items-center gap-3 bg-bg-card border border-bg-border rounded-xl p-3"
+                          className="group flex items-center gap-2 sm:gap-3 bg-bg-card border border-bg-border rounded-xl p-3"
                         >
                           {/* Reorder controls */}
                           <div className="flex flex-col gap-0.5">

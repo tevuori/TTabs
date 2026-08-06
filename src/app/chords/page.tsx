@@ -1,16 +1,15 @@
 "use client";
 
 import { useState, useMemo } from "react";
-import { useRouter } from "next/navigation";
 import { getChordLibrary, getChordPositions } from "@/lib/chord-shapes";
 import { ChordFingering } from "@/lib/types";
 import ChordDiagram from "@/components/ChordDiagram";
 import Fretboard from "@/components/Fretboard";
 import { playChord, unlockAudio } from "@/lib/audio";
 import { AuthGuard } from "@/components/AuthGuard";
+import Header from "@/components/Header";
 
 export default function ChordsPage() {
-  const router = useRouter();
   const library = useMemo(() => getChordLibrary(), []);
 
   const [query, setQuery] = useState("");
@@ -47,26 +46,7 @@ export default function ChordsPage() {
   return (
     <AuthGuard>
       <div className="min-h-screen flex flex-col">
-        <header className="border-b border-bg-border">
-        <div className="max-w-6xl mx-auto px-4 py-4 flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <div className="w-8 h-8 bg-accent rounded-lg flex items-center justify-center">
-              <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
-                <path d="M5 3V15M9 3V15M13 3V15M3 6H15M3 10H15" stroke="white" strokeWidth="1.5" strokeLinecap="round" />
-              </svg>
-            </div>
-            <span className="text-xl font-bold text-text">TTabs</span>
-          </div>
-          <nav className="flex items-center gap-1">
-            <button onClick={() => router.push("/")} className="px-3 py-1.5 text-sm font-medium text-text-muted hover:text-accent transition-colors">Search</button>
-            <button onClick={() => router.push("/library")} className="px-3 py-1.5 text-sm font-medium text-text-muted hover:text-accent transition-colors">Library</button>
-            <button onClick={() => router.push("/chords")} className="px-3 py-1.5 text-sm font-medium text-text hover:text-accent transition-colors">Chords</button>
-            <button onClick={() => router.push("/capo")} className="px-3 py-1.5 text-sm font-medium text-text-muted hover:text-accent transition-colors">Capo</button>
-            <button onClick={() => router.push("/setlists")} className="px-3 py-1.5 text-sm font-medium text-text-muted hover:text-accent transition-colors">Setlists</button>
-            <button onClick={() => router.push("/settings")} className="px-3 py-1.5 text-sm font-medium text-text-muted hover:text-accent transition-colors">Settings</button>
-          </nav>
-        </div>
-      </header>
+        <Header />
 
       <main className="flex-1 max-w-6xl mx-auto w-full px-4 py-8">
         <h1 className="text-2xl font-bold text-text mb-2">Chord Library</h1>
@@ -75,7 +55,7 @@ export default function ChordsPage() {
         </p>
 
         {/* Search */}
-        <div className="relative mb-6 max-w-md">
+        <div className="relative mb-6 max-w-md w-full">
           <svg className="absolute left-3 top-1/2 -translate-y-1/2 text-text-muted" width="16" height="16" viewBox="0 0 16 16" fill="none">
             <circle cx="7" cy="7" r="5" stroke="currentColor" strokeWidth="2" />
             <path d="M11 11L14 14" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
@@ -162,7 +142,7 @@ export default function ChordsPage() {
                 ) : positions.length === 0 ? (
                   <p className="text-text-muted text-sm">No voicings available.</p>
                 ) : (
-                  <div className="grid grid-cols-2 gap-3 max-h-[60vh] overflow-y-auto pr-1">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-h-[60vh] overflow-y-auto pr-1">
                     {positions.map((fingering, i) => (
                       <div key={i} className="group relative bg-bg-hover rounded-lg p-2 flex flex-col items-center">
                         <ChordDiagram chordName={selected.display} fingering={fingering} size="medium" />

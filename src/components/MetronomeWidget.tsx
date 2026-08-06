@@ -62,9 +62,9 @@ export default function MetronomeWidget() {
   };
 
   return (
-    <div className="fixed bottom-4 right-4 z-50 print:hidden">
+    <div className="fixed bottom-4 right-3 sm:right-4 z-50 print:hidden">
       {open ? (
-        <div className="bg-bg-card border border-bg-border rounded-2xl shadow-2xl p-4 w-64 fade-in">
+        <div className="bg-bg-card border border-bg-border rounded-2xl shadow-2xl p-4 w-60 sm:w-64 fade-in">
           {/* Header */}
           <div className="flex items-center justify-between mb-3">
             <span className="text-text font-semibold text-sm">Metronome</span>

@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import { SongTab } from "@/lib/types";
+import Header from "@/components/Header";
 import { getAllSongs, deleteSong } from "@/lib/storage";
 import { BEGINNER_CHORDS, songUsesOnlyKnownChords } from "@/lib/chords";
 import { AuthGuard } from "@/components/AuthGuard";
@@ -76,57 +77,7 @@ export default function LibraryPage() {
   return (
     <AuthGuard>
       <div className="min-h-screen flex flex-col">
-        {/* Header */}
-      <header className="border-b border-bg-border">
-        <div className="max-w-6xl mx-auto px-4 py-4 flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <div className="w-8 h-8 bg-accent rounded-lg flex items-center justify-center">
-              <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
-                <path d="M5 3V15M9 3V15M13 3V15M3 6H15M3 10H15" stroke="white" strokeWidth="1.5" strokeLinecap="round" />
-              </svg>
-            </div>
-            <span className="text-xl font-bold text-text">TTabs</span>
-          </div>
-          <nav className="flex items-center gap-1">
-            <button
-              onClick={() => router.push("/")}
-              className="px-3 py-1.5 text-sm font-medium text-text-muted hover:text-accent transition-colors"
-            >
-              Search
-            </button>
-            <button
-              onClick={() => router.push("/library")}
-              className="px-3 py-1.5 text-sm font-medium text-text hover:text-accent transition-colors"
-            >
-              Library
-            </button>
-            <button
-              onClick={() => router.push("/chords")}
-              className="px-3 py-1.5 text-sm font-medium text-text-muted hover:text-accent transition-colors"
-            >
-              Chords
-            </button>
-            <button
-              onClick={() => router.push("/capo")}
-              className="px-3 py-1.5 text-sm font-medium text-text-muted hover:text-accent transition-colors"
-            >
-              Capo
-            </button>
-            <button
-              onClick={() => router.push("/setlists")}
-              className="px-3 py-1.5 text-sm font-medium text-text-muted hover:text-accent transition-colors"
-            >
-              Setlists
-            </button>
-            <button
-              onClick={() => router.push("/settings")}
-              className="px-3 py-1.5 text-sm font-medium text-text-muted hover:text-accent transition-colors"
-            >
-              Settings
-            </button>
-          </nav>
-        </div>
-      </header>
+        <Header />
 
       {/* Main content */}
       <main className="flex-1 max-w-4xl mx-auto w-full px-4 py-8">
@@ -250,7 +201,7 @@ export default function LibraryPage() {
                 key={song.id}
                 className="group bg-bg-card hover:bg-bg-hover border border-bg-border hover:border-accent/40 rounded-xl p-4 transition-all"
               >
-                <div className="flex items-start justify-between gap-3">
+                <div className="flex items-start justify-between gap-2 sm:gap-3 flex-wrap">
                   <button
                     onClick={() => router.push(`/song/${encodeURIComponent(song.id)}`)}
                     className="min-w-0 flex-1 text-left"
@@ -297,7 +248,7 @@ export default function LibraryPage() {
                       </div>
                     )}
                   </button>
-                  <div className="flex items-center gap-1 flex-shrink-0">
+                  <div className="flex items-center gap-1 flex-shrink-0 flex-wrap">
                     <button
                       onClick={() => router.push(`/song/${encodeURIComponent(song.id)}`)}
                       className="p-2 text-text-muted hover:text-accent transition-colors"

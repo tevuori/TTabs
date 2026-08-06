@@ -7,6 +7,7 @@ import { transposeChord, shouldUseFlats } from "@/lib/chords";
 import { getChordFingerings, getChordShapes } from "@/lib/chord-shapes";
 import { playChord, unlockAudio } from "@/lib/audio";
 import { SongPlayer, extractPlaybackChords } from "@/lib/playback";
+import { BackingTrack, type BackingLayer } from "@/lib/backing-track";
 import { parseLrc, alignLyrics, lineAtTime, type LyricAlignment } from "@/lib/lyrics";
 import { saveSong, saveSongState, getSongState, deleteSongState } from "@/lib/storage";
 import { buildShareableUrl } from "@/lib/share";
@@ -46,6 +47,13 @@ export default function SongViewer({ song, isSaved, onSaveToggle, initialState }
   const [activePlaybackLine, setActivePlaybackLine] = useState<number | null>(null);
   const playerRef = useRef<import("@/lib/playback").SongPlayer | null>(null);
 
+  // Backing track (synthesized chords + bass + drums)
+  const [backingPlaying, setBackingPlaying] = useState(false);
+  const [backingLayers, setBackingLayers] = useState<Set<BackingLayer>>(
+    new Set<BackingLayer>(["chords", "bass", "drums"])
+  );
+  const backingRef = useRef<BackingTrack | null>(null);
+
   // Synced-lyrics scroll
   const [lyricsStatus, setLyricsStatus] = useState<"idle" | "fetching" | "found" | "none" | "error">("idle");
   const [lyricsAlignments, setLyricsAlignments] = useState<LyricAlignment[]>([]);
@@ -69,6 +77,8 @@ export default function SongViewer({ song, isSaved, onSaveToggle, initialState }
   // and shows a visible timer before synced-lyrics scroll begins.
   const [syncCountdown, setSyncCountdown] = useState<number | null>(null);
   const [countdownLine, setCountdownLine] = useState<number | null>(null);
+  // When true, the backing track should start when the countdown ends.
+  const backingPendingRef = useRef(false);
 
   // Load saved state on mount. URL-provided initialState (from a shared link)
   // takes priority over the locally saved state.
@@ -394,6 +404,49 @@ export default function SongViewer({ song, isSaved, onSaveToggle, initialState }
     setActiveSyncLine(null);
   }, []);
 
+  // --- Backing track (synthesized chords + bass + drums) ---
+  // Defined here (before the countdown/sync logic) because the countdown
+  // effect and handleToggleSync reference these callbacks.
+  const stopBackingTrack = useCallback(() => {
+    backingRef.current?.stop();
+    backingRef.current = null;
+    setBackingPlaying(false);
+    setActivePlaybackLine(null);
+  }, []);
+
+  // Stop both the backing track and sync scroll together, since they start
+  // together as a unified practice session.
+  const stopBackingAndSync = useCallback(() => {
+    backingPendingRef.current = false;
+    stopBackingTrack();
+    stopSyncScroll();
+  }, [stopBackingTrack, stopSyncScroll]);
+
+  // Create and start the BackingTrack engine (called after the countdown).
+  const startBackingTrack = useCallback(() => {
+    const chords = extractPlaybackChords(parsedLines, (chordName) => {
+      const { displayName, fingerings } = getChordWithFingerings(chordName);
+      return { name: displayName, fingerings };
+    });
+    if (chords.length === 0) return;
+    unlockAudio();
+    const track = new BackingTrack(chords, {
+      bpm: playbackBpm,
+      beatsPerChord,
+      capo: effectiveCapo ?? 0,
+      layers: backingLayers,
+      onChord: (c) => setActivePlaybackLine(c ? c.lineIndex : null),
+      onEnd: () => {
+        setBackingPlaying(false);
+        setActivePlaybackLine(null);
+        backingRef.current = null;
+      },
+    });
+    backingRef.current = track;
+    track.start();
+    setBackingPlaying(true);
+  }, [parsedLines, getChordWithFingerings, playbackBpm, beatsPerChord, effectiveCapo, backingLayers]);
+
   // Cancel any in-progress pre-sync countdown.
   const cancelSyncCountdown = useCallback(() => {
     setSyncCountdown(null);
@@ -408,7 +461,7 @@ export default function SongViewer({ song, isSaved, onSaveToggle, initialState }
   const handleToggleSync = useCallback(() => {
     if (syncScroll || syncCountdown !== null) {
       cancelSyncCountdown();
-      stopSyncScroll();
+      stopBackingAndSync();
       return;
     }
     if (lyricsAlignments.length === 0) return;
@@ -422,16 +475,25 @@ export default function SongViewer({ song, isSaved, onSaveToggle, initialState }
       setCountdownLine(firstIdx);
     }
     setSyncCountdown(5);
-  }, [syncScroll, syncCountdown, lyricsAlignments.length, firstChordLineIdx, cancelSyncCountdown, stopSyncScroll]);
+  }, [syncScroll, syncCountdown, lyricsAlignments.length, firstChordLineIdx, cancelSyncCountdown, stopBackingAndSync]);
 
   // Drive the pre-sync countdown. Each tick decrements by 1; once the final
-  // "1" is shown for a full second, the real synced-lyrics scroll starts.
+  // "1" is shown for a full second, the synced-lyrics scroll and/or backing
+  // track starts (depending on what triggered the countdown).
   useEffect(() => {
     if (syncCountdown === null) return;
     if (syncCountdown <= 1) {
       const id = setTimeout(() => {
         setCountdownLine(null);
-        setSyncScroll(true);
+        // Start synced-lyrics scroll if alignments are available.
+        if (syncAlignmentsRef.current.length > 0) {
+          setSyncScroll(true);
+        }
+        // Start the backing track if the countdown was triggered by it.
+        if (backingPendingRef.current) {
+          backingPendingRef.current = false;
+          startBackingTrack();
+        }
         setSyncCountdown(null);
       }, 1000);
       return () => clearTimeout(id);
@@ -440,7 +502,7 @@ export default function SongViewer({ song, isSaved, onSaveToggle, initialState }
       setSyncCountdown(c => (c === null ? null : c - 1));
     }, 1000);
     return () => clearTimeout(id);
-  }, [syncCountdown]);
+  }, [syncCountdown, startBackingTrack]);
 
   useEffect(() => {
     if (!syncScroll) {
@@ -594,6 +656,8 @@ export default function SongViewer({ song, isSaved, onSaveToggle, initialState }
       stopPlayback();
       return;
     }
+    // Mutual exclusion: stop the backing track + sync scroll if running.
+    stopBackingAndSync();
     const chords = extractPlaybackChords(parsedLines, (chordName) => {
       const { displayName, fingerings } = getChordWithFingerings(chordName);
       return { name: displayName, fingerings };
@@ -614,26 +678,75 @@ export default function SongViewer({ song, isSaved, onSaveToggle, initialState }
     playerRef.current = player;
     player.start();
     setPlaying(true);
-  }, [playing, parsedLines, getChordWithFingerings, playbackBpm, beatsPerChord, effectiveCapo, stopPlayback]);
+  }, [playing, parsedLines, getChordWithFingerings, playbackBpm, beatsPerChord, effectiveCapo, stopPlayback, stopBackingAndSync]);
+
+  const handleToggleBacking = useCallback(() => {
+    if (backingPlaying || syncCountdown !== null && backingPendingRef.current) {
+      // Stop everything if backing is playing or a backing countdown is active.
+      stopBackingAndSync();
+      return;
+    }
+    if (syncCountdown !== null) {
+      // A sync-only countdown is running — cancel it and start a backing one.
+      cancelSyncCountdown();
+    }
+    // Mutual exclusion: stop song playback if it's running.
+    stopPlayback();
+    // Verify we have chords to play before starting the countdown.
+    const chords = extractPlaybackChords(parsedLines, (chordName) => {
+      const { displayName, fingerings } = getChordWithFingerings(chordName);
+      return { name: displayName, fingerings };
+    });
+    if (chords.length === 0) return;
+    unlockAudio();
+    // Start the 5s countdown: scroll to first chord, highlight it, show timer.
+    const firstIdx = firstChordLineIdx;
+    if (firstIdx !== null) {
+      const el = lineRefs.current[firstIdx];
+      if (el) el.scrollIntoView({ behavior: "smooth", block: "center" });
+      setCountdownLine(firstIdx);
+    }
+    backingPendingRef.current = true;
+    setSyncCountdown(5);
+  }, [backingPlaying, syncCountdown, parsedLines, getChordWithFingerings, firstChordLineIdx, stopBackingAndSync, cancelSyncCountdown, stopPlayback]);
+
+  // Toggle a single backing layer on/off. Updates the engine live if running.
+  const handleToggleLayer = useCallback((layer: BackingLayer) => {
+    setBackingLayers(prev => {
+      const next = new Set(prev);
+      if (next.has(layer)) next.delete(layer);
+      else next.add(layer);
+      backingRef.current?.setLayers(next);
+      return next;
+    });
+  }, []);
+
+  // Keep the backing track BPM in sync with the playback BPM slider.
+  useEffect(() => {
+    if (backingRef.current) backingRef.current.setBpm(playbackBpm);
+  }, [playbackBpm]);
 
   // Stop playback if the song changes or on unmount.
   useEffect(() => {
-    return () => stopPlayback();
-  }, [song.id, stopPlayback]);
+    return () => {
+      stopPlayback();
+      stopBackingAndSync();
+    };
+  }, [song.id, stopPlayback, stopBackingAndSync]);
 
   return (
-    <div className="max-w-4xl mx-auto px-4 py-6 print-area">
+    <div className="max-w-4xl mx-auto px-3 sm:px-4 py-4 sm:py-6 print-area">
       {/* Header */}
       <div className="mb-6">
-        <div className="flex items-start justify-between gap-4 mb-3">
-          <div className="min-w-0">
-            <h1 className="text-2xl font-bold text-text truncate">{song.songName}</h1>
-            <p className="text-text-muted text-lg truncate">{song.artistName}</p>
+        <div className="flex items-start justify-between gap-2 sm:gap-4 mb-3">
+          <div className="min-w-0 flex-1">
+            <h1 className="text-xl sm:text-2xl font-bold text-text truncate">{song.songName}</h1>
+            <p className="text-text-muted text-base sm:text-lg truncate">{song.artistName}</p>
           </div>
-          <div className="flex items-center gap-2 flex-shrink-0 print:hidden">
+          <div className="flex items-center gap-1.5 sm:gap-2 flex-shrink-0 print:hidden">
             <button
               onClick={handleSaveState}
-              className={`px-4 py-2 rounded-lg font-medium text-sm transition-all ${
+              className={`px-3 sm:px-4 py-2 rounded-lg font-medium text-sm transition-all ${
                 isSaved
                   ? "bg-bg-hover text-text-muted border border-bg-border"
                   : "bg-accent hover:bg-accent-hover text-white"
@@ -711,7 +824,7 @@ export default function SongViewer({ song, isSaved, onSaveToggle, initialState }
         </div>
 
         {/* Controls */}
-        <div className="flex flex-wrap items-center gap-3 print:hidden">
+        <div className="flex flex-wrap items-center gap-2 sm:gap-3 print:hidden">
           <TransposeControls
             transposition={transposition}
             onTranspose={setTransposition}
@@ -942,6 +1055,66 @@ export default function SongViewer({ song, isSaved, onSaveToggle, initialState }
             </div>
           </div>
 
+          {/* Backing track — synthesized chords + bass + drums */}
+          <div className="flex items-center gap-1.5 bg-bg-card border border-bg-border rounded-xl p-1.5">
+            <button
+              onClick={handleToggleBacking}
+              className={`w-8 h-8 flex items-center justify-center rounded-lg transition-colors ${
+                backingPlaying || (syncCountdown !== null && backingPendingRef.current)
+                  ? "bg-accent text-white"
+                  : "bg-bg-hover hover:bg-bg-border text-text"
+              }`}
+              title={backingPlaying ? "Stop backing track + sync" : "Play backing track with synced scroll (5s countdown)"}
+            >
+              {backingPlaying || (syncCountdown !== null && backingPendingRef.current) ? (
+                <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor">
+                  <rect x="2" y="2" width="3" height="8" rx="1" />
+                  <rect x="7" y="2" width="3" height="8" rx="1" />
+                </svg>
+              ) : (
+                <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor">
+                  <path d="M2 1L11 6L2 11V1Z" />
+                </svg>
+              )}
+            </button>
+            <span className="text-text-muted text-xs font-medium px-1">Backing</span>
+            <div className="flex items-center gap-0.5 border-l border-bg-border pl-1.5">
+              <button
+                onClick={() => handleToggleLayer("chords")}
+                className={`px-2 h-7 flex items-center justify-center rounded-lg text-[10px] font-medium transition-colors ${
+                  backingLayers.has("chords")
+                    ? "bg-accent text-white"
+                    : "bg-bg-hover text-text-muted hover:text-text"
+                }`}
+                title="Toggle chord pads"
+              >
+                Chords
+              </button>
+              <button
+                onClick={() => handleToggleLayer("bass")}
+                className={`px-2 h-7 flex items-center justify-center rounded-lg text-[10px] font-medium transition-colors ${
+                  backingLayers.has("bass")
+                    ? "bg-accent text-white"
+                    : "bg-bg-hover text-text-muted hover:text-text"
+                }`}
+                title="Toggle bass line"
+              >
+                Bass
+              </button>
+              <button
+                onClick={() => handleToggleLayer("drums")}
+                className={`px-2 h-7 flex items-center justify-center rounded-lg text-[10px] font-medium transition-colors ${
+                  backingLayers.has("drums")
+                    ? "bg-accent text-white"
+                    : "bg-bg-hover text-text-muted hover:text-text"
+                }`}
+                title="Toggle drums"
+              >
+                Drums
+              </button>
+            </div>
+          </div>
+
           <button
             onClick={() => setShowAllChords(!showAllChords)}
             className="px-3 py-2 bg-bg-card hover:bg-bg-hover border border-bg-border rounded-xl text-text-muted text-sm transition-colors"
@@ -986,7 +1159,7 @@ export default function SongViewer({ song, isSaved, onSaveToggle, initialState }
 
       {/* Chord summary — all unique chords with diagrams */}
       {showAllChords && uniqueChords.length > 0 && (
-        <div className="mb-6 bg-bg-card border border-bg-border rounded-xl p-4">
+        <div className="mb-6 bg-bg-card border border-bg-border rounded-xl p-3 sm:p-4">
           <h2 className="text-text-muted text-xs font-semibold uppercase tracking-wider mb-3">
             Chords Used ({uniqueChords.length}) — click ▶ to hear
           </h2>
@@ -1024,7 +1197,7 @@ export default function SongViewer({ song, isSaved, onSaveToggle, initialState }
 
       {/* Tab content */}
       <div
-        className="bg-bg-card border border-bg-border rounded-xl p-6 overflow-x-auto"
+        className="bg-bg-card border border-bg-border rounded-xl p-3 sm:p-6 overflow-x-auto"
         style={{ ["--tab-font-size" as string]: `${fontSize}px` }}
       >
         <div className="tab-content" style={{ fontSize: `${fontSize}px` }}>
@@ -1063,18 +1236,20 @@ export default function SongViewer({ song, isSaved, onSaveToggle, initialState }
 
       {/* Pre-sync countdown overlay — visible during the 5s get-ready window */}
       {syncCountdown !== null && (
-        <div className="fixed bottom-20 right-4 z-50 flex items-center gap-3 bg-bg-card border border-accent rounded-full shadow-2xl pl-3 pr-1 py-1 print:hidden">
+        <div className="fixed bottom-20 right-3 sm:right-4 z-50 flex items-center gap-2 sm:gap-3 bg-bg-card border border-accent rounded-full shadow-2xl pl-3 pr-1 py-1 print:hidden">
           <div className="flex items-center justify-center w-9 h-9 rounded-full bg-accent text-white font-bold text-lg leading-none">
             {syncCountdown}
           </div>
           <div className="flex flex-col items-start leading-none">
             <span className="text-text text-xs font-semibold">Get ready</span>
-            <span className="text-text-dim text-[9px] mt-0.5">Starting sync…</span>
+            <span className="text-text-dim text-[9px] mt-0.5">
+              {backingPendingRef.current ? "Starting backing track…" : "Starting sync…"}
+            </span>
           </div>
           <button
-            onClick={handleToggleSync}
+            onClick={stopBackingAndSync}
             className="w-9 h-9 flex items-center justify-center bg-red-500/15 hover:bg-red-500/25 text-red-400 rounded-full transition-colors"
-            title="Cancel countdown"
+            title="Cancel"
           >
             <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor">
               <rect x="2" y="2" width="8" height="8" rx="1.5" />
@@ -1085,7 +1260,7 @@ export default function SongViewer({ song, isSaved, onSaveToggle, initialState }
 
       {/* Floating sync control — visible while synced scroll is active */}
       {syncScroll && (
-        <div className="fixed bottom-20 right-4 z-50 flex items-center gap-2 bg-bg-card border border-bg-border rounded-full shadow-2xl pl-2 pr-1 py-1 print:hidden">
+        <div className="fixed bottom-20 right-3 sm:right-4 z-50 flex items-center gap-2 bg-bg-card border border-bg-border rounded-full shadow-2xl pl-2 pr-1 py-1 print:hidden">
           <button
             onClick={() => setSyncPaused(p => !p)}
             className="w-9 h-9 flex items-center justify-center rounded-full transition-colors"
@@ -1109,9 +1284,9 @@ export default function SongViewer({ song, isSaved, onSaveToggle, initialState }
             <span className="text-text-dim text-[9px] mt-0.5">Space to {syncPaused ? "resume" : "pause"}</span>
           </div>
           <button
-            onClick={stopSyncScroll}
+            onClick={stopBackingAndSync}
             className="w-9 h-9 flex items-center justify-center bg-red-500/15 hover:bg-red-500/25 text-red-400 rounded-full transition-colors"
-            title="Stop sync"
+            title="Stop"
           >
             <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor">
               <rect x="2" y="2" width="8" height="8" rx="1.5" />

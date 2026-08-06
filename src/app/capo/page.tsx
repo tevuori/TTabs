@@ -1,12 +1,11 @@
 "use client";
 
 import { useState, useMemo } from "react";
-import { useRouter } from "next/navigation";
 import { findCapoSolutions, BEGINNER_CHORDS } from "@/lib/chords";
 import { AuthGuard } from "@/components/AuthGuard";
+import Header from "@/components/Header";
 
 export default function CapoCalculatorPage() {
-  const router = useRouter();
   const [songChordsInput, setSongChordsInput] = useState("");
   const [knownChordsInput, setKnownChordsInput] = useState(
     BEGINNER_CHORDS.join(", ")
@@ -35,26 +34,7 @@ export default function CapoCalculatorPage() {
   return (
     <AuthGuard>
       <div className="min-h-screen flex flex-col">
-        <header className="border-b border-bg-border">
-        <div className="max-w-6xl mx-auto px-4 py-4 flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <div className="w-8 h-8 bg-accent rounded-lg flex items-center justify-center">
-              <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
-                <path d="M5 3V15M9 3V15M13 3V15M3 6H15M3 10H15" stroke="white" strokeWidth="1.5" strokeLinecap="round" />
-              </svg>
-            </div>
-            <span className="text-xl font-bold text-text">TTabs</span>
-          </div>
-          <nav className="flex items-center gap-1">
-            <button onClick={() => router.push("/")} className="px-3 py-1.5 text-sm font-medium text-text-muted hover:text-accent transition-colors">Search</button>
-            <button onClick={() => router.push("/library")} className="px-3 py-1.5 text-sm font-medium text-text-muted hover:text-accent transition-colors">Library</button>
-            <button onClick={() => router.push("/chords")} className="px-3 py-1.5 text-sm font-medium text-text-muted hover:text-accent transition-colors">Chords</button>
-            <button onClick={() => router.push("/capo")} className="px-3 py-1.5 text-sm font-medium text-text hover:text-accent transition-colors">Capo</button>
-            <button onClick={() => router.push("/setlists")} className="px-3 py-1.5 text-sm font-medium text-text-muted hover:text-accent transition-colors">Setlists</button>
-            <button onClick={() => router.push("/settings")} className="px-3 py-1.5 text-sm font-medium text-text-muted hover:text-accent transition-colors">Settings</button>
-          </nav>
-        </div>
-      </header>
+        <Header />
 
       <main className="flex-1 max-w-3xl mx-auto w-full px-4 py-8">
         <h1 className="text-2xl font-bold text-text mb-2">Capo Calculator</h1>

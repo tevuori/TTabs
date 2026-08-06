@@ -16,9 +16,9 @@ export default function TransposeControls({
   transposedKey,
 }: TransposeControlsProps) {
   return (
-    <div className="flex items-center gap-3 bg-bg-card border border-bg-border rounded-xl p-2">
+    <div className="flex items-center gap-2 sm:gap-3 bg-bg-card border border-bg-border rounded-xl p-2">
       <div className="flex items-center gap-1">
-        <span className="text-text-muted text-xs font-medium px-2">Transpose</span>
+        <span className="text-text-muted text-xs font-medium px-1 sm:px-2">Transpose</span>
         <button
           onClick={() => onTranspose(transposition - 1)}
           className="w-8 h-8 flex items-center justify-center bg-bg-hover hover:bg-bg-border rounded-lg text-text transition-colors"
@@ -51,9 +51,9 @@ export default function TransposeControls({
         </button>
       )}
 
-      <div className="h-5 w-px bg-bg-border" />
+      <div className="hidden sm:block h-5 w-px bg-bg-border" />
 
-      <div className="flex items-center gap-2 text-xs">
+      <div className="hidden sm:flex items-center gap-2 text-xs">
         <div className="flex items-center gap-1">
           <span className="text-text-dim">Key:</span>
           <span className="text-text-muted font-mono">{currentKey || "—"}</span>

@@ -12,6 +12,7 @@ import {
   type User,
 } from "@/lib/auth";
 import { AuthGuard, useRequireAuth } from "@/components/AuthGuard";
+import Header from "@/components/Header";
 
 export default function SettingsPage() {
   return (
@@ -102,27 +103,7 @@ function SettingsContent() {
 
   return (
     <div className="min-h-screen flex flex-col">
-      <header className="border-b border-bg-border">
-        <div className="max-w-6xl mx-auto px-4 py-4 flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <div className="w-8 h-8 bg-accent rounded-lg flex items-center justify-center">
-              <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
-                <path d="M5 3V15M9 3V15M13 3V15M3 6H15M3 10H15" stroke="white" strokeWidth="1.5" strokeLinecap="round" />
-              </svg>
-            </div>
-            <span className="text-xl font-bold text-text">TTabs</span>
-          </div>
-          <nav className="flex items-center gap-1">
-            <button onClick={() => router.push("/")} className="px-3 py-1.5 text-sm font-medium text-text-muted hover:text-accent transition-colors">Search</button>
-            <button onClick={() => router.push("/library")} className="px-3 py-1.5 text-sm font-medium text-text-muted hover:text-accent transition-colors">Library</button>
-            <button onClick={() => router.push("/setlists")} className="px-3 py-1.5 text-sm font-medium text-text-muted hover:text-accent transition-colors">Setlists</button>
-            <button onClick={() => router.push("/settings")} className="px-3 py-1.5 text-sm font-medium text-text hover:text-accent transition-colors">Settings</button>
-            <button onClick={handleLogout} className="px-3 py-1.5 text-sm font-medium text-text-muted hover:text-red-400 transition-colors ml-2">
-              Logout
-            </button>
-          </nav>
-        </div>
-      </header>
+      <Header />
 
       <main className="flex-1 max-w-3xl mx-auto w-full px-4 py-8">
         <h1 className="text-2xl font-bold text-text mb-2">Settings</h1>
@@ -199,7 +180,7 @@ function SettingsContent() {
                   {users.map(user => (
                     <div
                       key={user.id}
-                      className="flex items-center gap-3 bg-bg-hover rounded-lg p-3"
+                      className="flex items-center gap-3 flex-wrap bg-bg-hover rounded-lg p-3"
                     >
                       {/* Avatar */}
                       <div className={`w-9 h-9 rounded-full flex items-center justify-center text-sm font-bold flex-shrink-0 ${
@@ -226,7 +207,7 @@ function SettingsContent() {
                       {/* Actions */}
                       <div className="flex items-center gap-1">
                         {editingPassword === user.id ? (
-                          <div className="flex items-center gap-1">
+                          <div className="flex items-center gap-1 flex-wrap">
                             <input
                               type="password"
                               value={editPasswordValue}

@@ -53,17 +53,18 @@ export default function YouTubePlayer({ query, onTimeUpdate }: YouTubePlayerProp
   const [loopA, setLoopA] = useState<number | null>(null);
   const [loopB, setLoopB] = useState<number | null>(null);
   const [looping, setLooping] = useState(false);
+  const [searchMode, setSearchMode] = useState<"audio" | "backing">("audio");
 
   const playerRef = useRef<unknown>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const timeTimerRef = useRef<number | null>(null);
 
-  const handleSearch = useCallback(async () => {
+  const handleSearch = useCallback(async (mode: "audio" | "backing" = searchMode) => {
     if (!query.trim()) return;
     setSearching(true);
     setSearchError(null);
     try {
-      const resp = await fetch(`/api/youtube?q=${encodeURIComponent(query)}`);
+      const resp = await fetch(`/api/youtube?q=${encodeURIComponent(query)}&type=${mode}`);
       const data = await resp.json();
       if (!resp.ok) {
         setSearchError(data.error || "Search failed");
@@ -79,7 +80,16 @@ export default function YouTubePlayer({ query, onTimeUpdate }: YouTubePlayerProp
     } finally {
       setSearching(false);
     }
-  }, [query]);
+  }, [query, searchMode]);
+
+  // Re-search when the mode changes (if the panel is open and we're not
+  // already showing a video).
+  useEffect(() => {
+    if (open && !selectedId) {
+      handleSearch();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchMode]);
 
   // Create the player when a video is selected.
   useEffect(() => {
@@ -239,6 +249,30 @@ export default function YouTubePlayer({ query, onTimeUpdate }: YouTubePlayerProp
 
       {!selectedId ? (
         <>
+          {/* Search mode toggle: Official audio vs. Backing track */}
+          <div className="flex items-center gap-1 mb-3">
+            <button
+              onClick={() => setSearchMode("audio")}
+              className={`px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors ${
+                searchMode === "audio"
+                  ? "bg-accent text-white"
+                  : "bg-bg-hover text-text-muted hover:text-text"
+              }`}
+            >
+              Official audio
+            </button>
+            <button
+              onClick={() => setSearchMode("backing")}
+              className={`px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors ${
+                searchMode === "backing"
+                  ? "bg-accent text-white"
+                  : "bg-bg-hover text-text-muted hover:text-text"
+              }`}
+            >
+              Backing track
+            </button>
+          </div>
+
           {searching ? (
             <div className="flex items-center gap-2 py-4">
               <div className="w-5 h-5 border-2 border-bg-border border-t-accent rounded-full animate-spin" />
@@ -268,7 +302,7 @@ export default function YouTubePlayer({ query, onTimeUpdate }: YouTubePlayerProp
             </div>
           )}
           <button
-            onClick={handleSearch}
+            onClick={() => handleSearch()}
             disabled={searching}
             className="mt-2 text-text-dim hover:text-accent text-xs transition-colors"
           >
@@ -304,7 +338,7 @@ export default function YouTubePlayer({ query, onTimeUpdate }: YouTubePlayerProp
               {fmt(currentTime)} / {fmt(duration)}
             </span>
             <button
-              onClick={() => setSelectedId(null)}
+              onClick={() => { setSelectedId(null); setResults([]); }}
               className="ml-auto text-text-dim hover:text-accent text-xs transition-colors"
             >
               Change video

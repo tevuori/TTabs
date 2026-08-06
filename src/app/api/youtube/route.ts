@@ -8,14 +8,21 @@ export const dynamic = "force-dynamic";
 
 export async function GET(request: NextRequest) {
   const query = request.nextUrl.searchParams.get("q") || "";
+  const searchType = request.nextUrl.searchParams.get("type") || "audio";
   if (!query.trim()) {
     return NextResponse.json({ error: "Query is required" }, { status: 400 });
   }
 
+  // Choose a search suffix based on the requested type.
+  const suffix =
+    searchType === "backing" ? " backing track" :
+    searchType === "karaoke" ? " karaoke" :
+    " official audio";
+
   try {
     // Use YouTube's public search page and parse video IDs from the HTML.
     // This avoids requiring a YouTube Data API key.
-    const url = `https://www.youtube.com/results?search_query=${encodeURIComponent(query + " official audio")}`;
+    const url = `https://www.youtube.com/results?search_query=${encodeURIComponent(query + suffix)}`;
     const resp = await fetch(url, {
       headers: {
         "User-Agent":

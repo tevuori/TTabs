@@ -29,7 +29,7 @@ export default function SearchBar({ onSearch, loading }: SearchBarProps) {
     <form onSubmit={handleSubmit} className="w-full max-w-2xl mx-auto">
       <div className="flex flex-col gap-3">
         {/* Provider checkboxes */}
-        <div className="flex items-center gap-4 justify-center">
+        <div className="flex items-center gap-3 sm:gap-4 justify-center flex-wrap">
           <label
             className="flex items-center gap-2 cursor-pointer select-none group"
           >
@@ -113,15 +113,15 @@ export default function SearchBar({ onSearch, loading }: SearchBarProps) {
             value={query}
             onChange={e => setQuery(e.target.value)}
             placeholder="Search for songs, artists..."
-            className="w-full pl-12 pr-28 py-3.5 bg-bg-card border border-bg-border rounded-xl text-text placeholder:text-text-dim focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent transition-all text-base"
+            className="w-full pl-12 pr-20 sm:pr-28 py-3.5 bg-bg-card border border-bg-border rounded-xl text-text placeholder:text-text-dim focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent transition-all text-base"
             disabled={loading}
           />
           <button
             type="submit"
             disabled={loading || !query.trim() || providers.length === 0}
-            className="absolute right-2 px-4 py-2 bg-accent hover:bg-accent-hover disabled:opacity-40 disabled:cursor-not-allowed text-white font-medium rounded-lg text-sm transition-colors"
+            className="absolute right-2 px-3 sm:px-4 py-2 bg-accent hover:bg-accent-hover disabled:opacity-40 disabled:cursor-not-allowed text-white font-medium rounded-lg text-sm transition-colors"
           >
-            {loading ? "Searching..." : "Search"}
+            {loading ? "..." : "Search"}
           </button>
         </div>
 

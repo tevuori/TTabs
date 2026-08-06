@@ -82,7 +82,7 @@ function UGResultCard({ result, onOpen }: { result: SearchResult; onOpen: () => 
   return (
     <button
       onClick={onOpen}
-      className="w-full text-left bg-bg-card hover:bg-bg-hover border border-bg-border hover:border-accent/40 rounded-xl p-4 transition-all group"
+      className="w-full text-left bg-bg-card hover:bg-bg-hover border border-bg-border hover:border-accent/40 rounded-xl p-3 sm:p-4 transition-all group"
     >
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0 flex-1">
@@ -118,7 +118,7 @@ function SongsterrResultCard({ result }: { result: SearchResult }) {
       href={result.url}
       target="_blank"
       rel="noopener noreferrer"
-      className="w-full text-left bg-bg-card hover:bg-bg-hover border border-bg-border hover:border-accent/40 rounded-xl p-4 transition-all group flex items-center justify-between gap-3"
+      className="w-full text-left bg-bg-card hover:bg-bg-hover border border-bg-border hover:border-accent/40 rounded-xl p-3 sm:p-4 transition-all group flex items-center justify-between gap-3"
     >
       <div className="min-w-0 flex-1">
         <h3 className="text-text font-semibold truncate group-hover:text-accent transition-colors">
