@@ -1,0 +1,111 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --font-inter: "Inter", system-ui, sans-serif;
+  --font-jetbrains: "JetBrains Mono", monospace;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  padding: 0;
+  margin: 0;
+  background: #0a0a0b;
+  color: #e4e4e7;
+  font-family: var(--font-inter);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: #0a0a0b;
+}
+::-webkit-scrollbar-thumb {
+  background: #26262e;
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #3a3a44;
+}
+
+/* Chord diagram styles */
+.chord-diagram {
+  display: inline-block;
+  vertical-align: middle;
+}
+
+/* Smooth transitions */
+button,
+a {
+  transition: all 0.15s ease;
+}
+
+/* Tab content monospace */
+.tab-content {
+  font-family: var(--font-jetbrains);
+  line-height: 1.6;
+  white-space: pre;
+}
+
+/* Chord line alignment */
+.chord-line {
+  font-family: var(--font-jetbrains);
+  white-space: pre;
+  line-height: 1.4;
+}
+
+.chord-token {
+  display: inline-block;
+  position: relative;
+  color: #f97316;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 0 1px;
+}
+
+.chord-token:hover {
+  color: #fb923c;
+  background: rgba(249, 115, 22, 0.1);
+  border-radius: 3px;
+}
+
+/* Animations */
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.fade-in {
+  animation: fadeIn 0.2s ease-out;
+}
+
+@keyframes slideDown {
+  from {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.slide-down {
+  animation: slideDown 0.15s ease-out;
+}
