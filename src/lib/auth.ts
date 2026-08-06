@@ -6,11 +6,7 @@
 // inherently limited — anyone with devtools access can read IndexedDB.
 // This is a gatekeeper for normal usage, not a hardened auth system.
 
-import { openDB, IDBPDatabase } from "idb";
-
-const DB_NAME = "ttabs";
-const DB_VERSION = 3; // bumped from 2 (setlists) to add users store
-const USERS_STORE = "users";
+import { getDB, USERS_STORE } from "./db";
 
 const SESSION_KEY = "ttabs_session";
 const SESSION_MAX_AGE = 1000 * 60 * 60 * 24 * 30; // 30 days
@@ -34,42 +30,6 @@ export interface Session {
   isAdmin: boolean;
   createdAt: number;
   expiresAt: number;
-}
-
-let dbPromise: Promise<IDBPDatabase> | null = null;
-
-function getDB(): Promise<IDBPDatabase> {
-  if (typeof window === "undefined") {
-    return Promise.reject(new Error("IndexedDB is only available in the browser"));
-  }
-  if (!dbPromise) {
-    dbPromise = openDB(DB_NAME, DB_VERSION, {
-      upgrade(db, oldVersion) {
-        if (oldVersion < 1) {
-          if (!db.objectStoreNames.contains("songs")) {
-            const store = db.createObjectStore("songs", { keyPath: "id" });
-            store.createIndex("savedAt", "savedAt");
-            store.createIndex("artistName", "artistName");
-          }
-          if (!db.objectStoreNames.contains("songStates")) {
-            db.createObjectStore("songStates", { keyPath: "songId" });
-          }
-        }
-        if (oldVersion < 2) {
-          if (!db.objectStoreNames.contains("setlists")) {
-            db.createObjectStore("setlists", { keyPath: "id" });
-          }
-        }
-        if (oldVersion < 3) {
-          if (!db.objectStoreNames.contains(USERS_STORE)) {
-            const store = db.createObjectStore(USERS_STORE, { keyPath: "id" });
-            store.createIndex("username", "username", { unique: true });
-          }
-        }
-      },
-    });
-  }
-  return dbPromise;
 }
 
 // Hash a password with a salt using SHA-256 via Web Crypto.

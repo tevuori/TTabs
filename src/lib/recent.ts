@@ -1,11 +1,28 @@
 // Recently-viewed songs, stored in localStorage (separate from the saved
 // library). Keeps a short history of songs the user has opened so they can
-// jump back in quickly.
+// jump back in quickly. Scoped per-user.
 
 import { SongTab } from "./types";
 
-const KEY = "ttabs:recent";
+const KEY_PREFIX = "ttabs:recent:";
 const MAX_ITEMS = 8;
+
+// Get the current user's ID from the session for per-user scoping.
+function getCurrentUserId(): string {
+  if (typeof window === "undefined") return "anon";
+  try {
+    const raw = localStorage.getItem("ttabs_session");
+    if (!raw) return "anon";
+    const session = JSON.parse(raw);
+    return session.userId || "anon";
+  } catch {
+    return "anon";
+  }
+}
+
+function storageKey(): string {
+  return KEY_PREFIX + getCurrentUserId();
+}
 
 // Minimal record persisted for each recently-viewed song.
 export interface RecentSong {
@@ -22,7 +39,7 @@ export interface RecentSong {
 function read(): RecentSong[] {
   if (typeof window === "undefined") return [];
   try {
-    const raw = localStorage.getItem(KEY);
+    const raw = localStorage.getItem(storageKey());
     if (!raw) return [];
     const parsed = JSON.parse(raw);
     return Array.isArray(parsed) ? parsed : [];
@@ -34,7 +51,7 @@ function read(): RecentSong[] {
 function write(items: RecentSong[]): void {
   if (typeof window === "undefined") return;
   try {
-    localStorage.setItem(KEY, JSON.stringify(items.slice(0, MAX_ITEMS)));
+    localStorage.setItem(storageKey(), JSON.stringify(items.slice(0, MAX_ITEMS)));
   } catch {
     // ignore quota / serialization errors
   }

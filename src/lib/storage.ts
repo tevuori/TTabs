@@ -1,118 +1,125 @@
 // IndexedDB storage for saved songs, chord/transposition state, and setlists.
+// All data is scoped per-user via a composite key (userId:songId).
 // Works on Vercel (client-side) without any backend database setup.
 
-import { openDB, IDBPDatabase } from "idb";
 import { SongTab, SongState } from "./types";
-
-const DB_NAME = "ttabs";
-const DB_VERSION = 2;
-const SONGS_STORE = "songs";
-const STATE_STORE = "songStates";
-const SETLISTS_STORE = "setlists";
+import { getDB, SONGS_STORE, STATE_STORE, SETLISTS_STORE } from "./db";
 
 export interface Setlist {
-  id: string; // unique ID
+  id: string; // unique ID (includes userId prefix)
   name: string;
-  songIds: string[]; // ordered list of saved-song IDs
+  songIds: string[]; // ordered list of saved-song keys
+  userId: string;
   createdAt: number;
   updatedAt: number;
 }
 
-let dbPromise: Promise<IDBPDatabase> | null = null;
-
-function getDB(): Promise<IDBPDatabase> {
-  if (typeof window === "undefined") {
-    return Promise.reject(new Error("IndexedDB is only available in the browser"));
+// Get the current user's ID from the session.
+function getCurrentUserId(): string {
+  if (typeof window === "undefined") return "anon";
+  try {
+    const raw = localStorage.getItem("ttabs_session");
+    if (!raw) return "anon";
+    const session = JSON.parse(raw);
+    return session.userId || "anon";
+  } catch {
+    return "anon";
   }
-  if (!dbPromise) {
-    dbPromise = openDB(DB_NAME, DB_VERSION, {
-      upgrade(db, oldVersion) {
-        if (oldVersion < 1) {
-          if (!db.objectStoreNames.contains(SONGS_STORE)) {
-            const store = db.createObjectStore(SONGS_STORE, { keyPath: "id" });
-            store.createIndex("savedAt", "savedAt");
-            store.createIndex("artistName", "artistName");
-          }
-          if (!db.objectStoreNames.contains(STATE_STORE)) {
-            db.createObjectStore(STATE_STORE, { keyPath: "songId" });
-          }
-        }
-        if (oldVersion < 2) {
-          if (!db.objectStoreNames.contains(SETLISTS_STORE)) {
-            db.createObjectStore(SETLISTS_STORE, { keyPath: "id" });
-          }
-        }
-      },
-    });
-  }
-  return dbPromise;
 }
 
-// Save a song to the library
+// Build a composite key for per-user song storage.
+function songKey(userId: string, songId: string): string {
+  return `${userId}:${songId}`;
+}
+
+// --- Songs ---
+
+// Save a song to the current user's library
 export async function saveSong(song: SongTab): Promise<void> {
   const db = await getDB();
-  await db.put(SONGS_STORE, song);
+  const userId = getCurrentUserId();
+  const key = songKey(userId, song.id);
+  await db.put(SONGS_STORE, { ...song, key, userId });
 }
 
-// Get a saved song by ID
+// Get a saved song by ID (for the current user)
 export async function getSong(id: string): Promise<SongTab | undefined> {
   const db = await getDB();
-  return db.get(SONGS_STORE, id);
+  const userId = getCurrentUserId();
+  const result = await db.get(SONGS_STORE, songKey(userId, id));
+  if (!result) return undefined;
+  const { key: _, userId: __, ...song } = result;
+  return song as SongTab;
 }
 
-// Get all saved songs, sorted by most recently saved
+// Get all saved songs for the current user, sorted by most recently saved
 export async function getAllSongs(): Promise<SongTab[]> {
   const db = await getDB();
-  const all = await db.getAll(SONGS_STORE);
-  return all.sort((a, b) => b.savedAt - a.savedAt);
+  const userId = getCurrentUserId();
+  const index = db.transaction(SONGS_STORE).store.index("userId");
+  const all = await index.getAll(userId);
+  return all
+    .map(({ key: _, userId: __, ...song }) => song as SongTab)
+    .sort((a, b) => b.savedAt - a.savedAt);
 }
 
-// Delete a saved song
+// Delete a saved song (for the current user)
 export async function deleteSong(id: string): Promise<void> {
   const db = await getDB();
-  await db.delete(SONGS_STORE, id);
+  const userId = getCurrentUserId();
+  const key = songKey(userId, id);
+  await db.delete(SONGS_STORE, key);
   // Also delete associated state
-  await db.delete(STATE_STORE, id);
+  await db.delete(STATE_STORE, key);
 }
 
-// Check if a song is saved
+// Check if a song is saved (for the current user)
 export async function isSongSaved(id: string): Promise<boolean> {
   const db = await getDB();
-  const song = await db.get(SONGS_STORE, id);
+  const userId = getCurrentUserId();
+  const song = await db.get(SONGS_STORE, songKey(userId, id));
   return !!song;
 }
 
-// Save chord/transposition state for a song
+// --- Song state ---
+
+// Save chord/transposition state for a song (for the current user)
 export async function saveSongState(songId: string, state: SongState): Promise<void> {
   const db = await getDB();
-  await db.put(STATE_STORE, { ...state, songId });
+  const userId = getCurrentUserId();
+  const key = songKey(userId, songId);
+  await db.put(STATE_STORE, { ...state, songId, key, userId });
 }
 
-// Get saved state for a song
+// Get saved state for a song (for the current user)
 export async function getSongState(songId: string): Promise<SongState | undefined> {
   const db = await getDB();
-  const result = await db.get(STATE_STORE, songId);
+  const userId = getCurrentUserId();
+  const result = await db.get(STATE_STORE, songKey(userId, songId));
   if (!result) return undefined;
-  const { songId: _, ...state } = result;
+  const { key: _, userId: __, songId: ___, ...state } = result;
   return state as SongState;
 }
 
-// Delete saved state for a song
+// Delete saved state for a song (for the current user)
 export async function deleteSongState(songId: string): Promise<void> {
   const db = await getDB();
-  await db.delete(STATE_STORE, songId);
+  const userId = getCurrentUserId();
+  await db.delete(STATE_STORE, songKey(userId, songId));
 }
 
 // --- Setlists ---
 
-// Create a new setlist.
+// Create a new setlist for the current user.
 export async function createSetlist(name: string): Promise<Setlist> {
   const db = await getDB();
+  const userId = getCurrentUserId();
   const now = Date.now();
   const setlist: Setlist = {
-    id: `setlist-${now}-${Math.random().toString(36).slice(2, 8)}`,
+    id: `setlist-${userId}-${now}-${Math.random().toString(36).slice(2, 8)}`,
     name: name.trim() || "Untitled setlist",
     songIds: [],
+    userId,
     createdAt: now,
     updatedAt: now,
   };
@@ -120,10 +127,12 @@ export async function createSetlist(name: string): Promise<Setlist> {
   return setlist;
 }
 
-// Get all setlists, most recently updated first.
+// Get all setlists for the current user, most recently updated first.
 export async function getAllSetlists(): Promise<Setlist[]> {
   const db = await getDB();
-  const all = (await db.getAll(SETLISTS_STORE)) as Setlist[];
+  const userId = getCurrentUserId();
+  const index = db.transaction(SETLISTS_STORE).store.index("userId");
+  const all = (await index.getAll(userId)) as Setlist[];
   return all.sort((a, b) => b.updatedAt - a.updatedAt);
 }
 
