@@ -9,6 +9,7 @@ import QRScanner from "@/components/QRScanner";
 import { exportAll, importAll } from "@/lib/storage";
 import { IS_MOBILE } from "@/lib/app-mode";
 import { getToken } from "@/lib/auth";
+import { syncAsOfferer, syncAsAnswerer } from "@/lib/sync/webrtc";
 import type { SyncPayload, ImportResult } from "@/lib/storage/types";
 
 export default function SyncPage() {
@@ -22,7 +23,7 @@ export default function SyncPage() {
 // --- Connection info encoded in the QR code ---
 
 interface SyncConnection {
-  url: string;      // e.g. "http://192.168.1.5:3000"
+  url: string;      // e.g. "https://tabs.tevuori.eu"
   session: string;  // 8-char hex session ID
 }
 
@@ -52,72 +53,84 @@ function SyncContent() {
 }
 
 // =====================================================================
-// Server side: shows a QR code with connection info, polls for status
+// Server side (laptop browser): creates session, WebRTC offer, shows QR
 // =====================================================================
 
 function ServerSync() {
   const [connection, setConnection] = useState<SyncConnection | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [phase, setPhase] = useState<"preparing" | "waiting" | "connecting" | "syncing" | "done" | "error">("preparing");
   const [error, setError] = useState<string | null>(null);
-  const [syncStatus, setSyncStatus] = useState<"waiting" | "syncing" | "completed" | null>(null);
-  const [syncResult, setSyncResult] = useState<ImportResult | null>(null);
-  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const [progress, setProgress] = useState<{ phase: "sending" | "receiving"; current: number; total: number } | null>(null);
+  const [result, setResult] = useState<ImportResult | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
 
-  const createSession = useCallback(async () => {
-    setLoading(true);
+  const start = useCallback(async () => {
+    setPhase("preparing");
     setError(null);
+    setResult(null);
+    setProgress(null);
+
     try {
+      // 1. Create a sync session on the server
       const token = getToken();
-      const resp = await fetch("/api/sync/session", {
+      const sessionResp = await fetch("/api/sync/session", {
         method: "POST",
         headers: token ? { Authorization: `Bearer ${token}` } : {},
       });
-      if (!resp.ok) {
-        const data = await resp.json().catch(() => ({}));
-        throw new Error(data.error || `Failed to create session (${resp.status})`);
+      if (!sessionResp.ok) {
+        const data = await sessionResp.json().catch(() => ({}));
+        throw new Error(data.error || `Failed to create session (${sessionResp.status})`);
       }
-      const data = await resp.json();
-      setConnection({ url: data.serverUrl, session: data.sessionId });
-      setSyncStatus("waiting");
+      const sessionData = await sessionResp.json();
+      const conn: SyncConnection = {
+        url: sessionData.serverUrl,
+        session: sessionData.sessionId,
+      };
+      setConnection(conn);
+
+      // 2. Export local data
+      const localPayload = await exportAll();
+
+      // 3. Start WebRTC as offerer — this creates the offer, stores it,
+      //    and waits for the mobile to answer. The QR code needs to be
+      //    visible while we wait, so we set phase to "waiting" now.
+      setPhase("waiting");
+
+      abortRef.current = new AbortController();
+      await syncAsOfferer({
+        role: "offerer",
+        serverUrl: conn.url,
+        sessionId: conn.session,
+        payload: localPayload,
+        signal: abortRef.current.signal,
+        onConnected: () => setPhase("syncing"),
+        onProgress: (info) => setProgress(info),
+        onReceived: async (remotePayload) => {
+          const res = await importAll(remotePayload as SyncPayload, "merge");
+          setResult(res);
+        },
+      });
+
+      setPhase("done");
     } catch (e) {
-      setError((e as Error).message);
-    } finally {
-      setLoading(false);
+      if ((e as Error).message !== "Aborted") {
+        setError((e as Error).message);
+        setPhase("error");
+      }
     }
   }, []);
 
   useEffect(() => {
-    createSession();
-  }, [createSession]);
+    start();
+    return () => abortRef.current?.abort();
+  }, [start]);
 
-  // Poll for sync status
-  useEffect(() => {
-    if (!connection) return;
-    const token = getToken();
-    const poll = async () => {
-      try {
-        const resp = await fetch(
-          `/api/sync/status?session=${connection.session}`,
-          { headers: token ? { Authorization: `Bearer ${token}` } : {} }
-        );
-        if (!resp.ok) return;
-        const data = await resp.json();
-        setSyncStatus(data.status);
-        if (data.status === "completed") {
-          setSyncResult(data.result);
-          if (pollRef.current) clearInterval(pollRef.current);
-        }
-      } catch {
-        // ignore poll errors
-      }
-    };
-    pollRef.current = setInterval(poll, 2000);
-    return () => {
-      if (pollRef.current) clearInterval(pollRef.current);
-    };
-  }, [connection]);
+  const restart = useCallback(() => {
+    abortRef.current?.abort();
+    start();
+  }, [start]);
 
-  if (loading) {
+  if (phase === "preparing") {
     return (
       <div className="min-h-screen flex flex-col">
         <Header />
@@ -134,8 +147,9 @@ function ServerSync() {
       <main className="flex-1 max-w-2xl mx-auto w-full px-4 py-8">
         <h1 className="text-2xl font-bold text-text mb-2">Data Sync</h1>
         <p className="text-text-muted text-sm mb-6">
-          Scan this QR code with the TTabs mobile app on your phone to sync
-          over your local WiFi network. Both devices must be on the same network.
+          Scan this QR code with the TTabs mobile app. Data transfers directly
+          between your devices over your local network — no internet needed for
+          the actual data.
         </p>
 
         {error && (
@@ -144,7 +158,7 @@ function ServerSync() {
               {error}
             </div>
             <button
-              onClick={createSession}
+              onClick={restart}
               className="px-4 py-2 bg-bg-card hover:bg-bg-hover border border-bg-border rounded-xl text-text-muted text-sm transition-colors"
             >
               Try again
@@ -152,19 +166,18 @@ function ServerSync() {
           </div>
         )}
 
-        {connection && (
+        {connection && (phase === "waiting" || phase === "connecting" || phase === "syncing") && (
           <div className="space-y-6">
             <div className="flex flex-col items-center gap-4">
               <QRDisplay
                 value={encodeConnection(connection)}
-                label={`Server: ${connection.url}`}
+                label={`Session: ${connection.session}`}
               />
             </div>
 
-            {/* Status indicator */}
             <div className="bg-bg-card border border-bg-border rounded-xl p-4">
               <div className="flex items-center gap-3">
-                {syncStatus === "waiting" && (
+                {phase === "waiting" && (
                   <>
                     <div className="w-3 h-3 rounded-full bg-yellow-500 animate-pulse" />
                     <div>
@@ -175,27 +188,33 @@ function ServerSync() {
                     </div>
                   </>
                 )}
-                {syncStatus === "syncing" && (
+                {phase === "syncing" && progress && (
                   <>
                     <div className="w-3 h-3 rounded-full bg-blue-500 animate-pulse" />
-                    <div>
-                      <p className="text-text text-sm font-medium">Syncing...</p>
-                      <p className="text-text-dim text-xs mt-0.5">
-                        Transferring data over WiFi
+                    <div className="flex-1">
+                      <p className="text-text text-sm font-medium">
+                        {progress.phase === "sending" ? "Sending data..." : "Receiving data..."}
+                      </p>
+                      <div className="mt-1.5 w-full bg-bg-hover rounded-full h-1.5 overflow-hidden">
+                        <div
+                          className="bg-accent h-full transition-all duration-150"
+                          style={{ width: `${progress.total > 0 ? (progress.current / progress.total) * 100 : 0}%` }}
+                        />
+                      </div>
+                      <p className="text-text-dim text-xs mt-1">
+                        {progress.current} / {progress.total} chunks
                       </p>
                     </div>
                   </>
                 )}
-                {syncStatus === "completed" && syncResult && (
+                {phase === "syncing" && !progress && (
                   <>
-                    <div className="w-3 h-3 rounded-full bg-green-500" />
+                    <div className="w-3 h-3 rounded-full bg-blue-500 animate-pulse" />
                     <div>
-                      <p className="text-text text-sm font-medium">Sync complete</p>
-                      <div className="flex gap-4 text-xs text-text-muted mt-0.5">
-                        <span><span className="text-text font-medium">{syncResult.added}</span> added</span>
-                        <span><span className="text-text font-medium">{syncResult.updated}</span> updated</span>
-                        <span><span className="text-text-dim">{syncResult.skipped}</span> skipped</span>
-                      </div>
+                      <p className="text-text text-sm font-medium">Connecting...</p>
+                      <p className="text-text-dim text-xs mt-0.5">
+                        Establishing peer-to-peer connection
+                      </p>
                     </div>
                   </>
                 )}
@@ -203,10 +222,34 @@ function ServerSync() {
             </div>
 
             <button
-              onClick={createSession}
+              onClick={restart}
               className="px-4 py-2 bg-bg-card hover:bg-bg-hover border border-bg-border rounded-xl text-text-muted text-sm transition-colors"
             >
-              Generate new QR code
+              Cancel and restart
+            </button>
+          </div>
+        )}
+
+        {phase === "done" && result && (
+          <div className="space-y-6">
+            <div className="p-5 bg-green-950/20 border border-green-900/40 rounded-xl text-center">
+              <div className="w-12 h-12 mx-auto mb-3 bg-green-500 rounded-full flex items-center justify-center">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
+                  <path d="M5 12L10 17L19 7" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+              </div>
+              <h2 className="text-text font-semibold text-base mb-2">Sync complete</h2>
+              <div className="flex justify-center gap-4 text-sm text-text-muted">
+                <span><span className="text-text font-medium">{result.added}</span> added</span>
+                <span><span className="text-text font-medium">{result.updated}</span> updated</span>
+                <span><span className="text-text-dim">{result.skipped}</span> skipped</span>
+              </div>
+            </div>
+            <button
+              onClick={restart}
+              className="px-4 py-2 bg-bg-card hover:bg-bg-hover border border-bg-border rounded-xl text-text-muted text-sm transition-colors"
+            >
+              Sync again
             </button>
           </div>
         )}
@@ -216,83 +259,61 @@ function ServerSync() {
 }
 
 // =====================================================================
-// Mobile side: scans QR to get connection info, then syncs over HTTP
+// Mobile side: scans QR, connects via WebRTC, exchanges data
 // =====================================================================
 
 function MobileSync() {
-  const [connection, setConnection] = useState<SyncConnection | null>(null);
-  const [phase, setPhase] = useState<"scan" | "ready" | "syncing" | "done" | "error">("scan");
+  const [phase, setPhase] = useState<"scan" | "connecting" | "syncing" | "done" | "error">("scan");
   const [error, setError] = useState<string | null>(null);
-  const [result, setResult] = useState<{ received: ImportResult; sent: ImportResult } | null>(null);
-  const [stats, setStats] = useState<{ songs: number; setlists: number } | null>(null);
+  const [progress, setProgress] = useState<{ phase: "sending" | "receiving"; current: number; total: number } | null>(null);
+  const [result, setResult] = useState<ImportResult | null>(null);
   const router = useRouter();
+  const abortRef = useRef<AbortController | null>(null);
 
-  const handleScan = useCallback((text: string) => {
+  const handleScan = useCallback(async (text: string) => {
     const conn = parseConnection(text);
     if (!conn) {
       setError("That QR code doesn't look like a TTabs sync code.");
       setPhase("error");
       return;
     }
-    setConnection(conn);
-    setPhase("ready");
-    setError(null);
-  }, []);
 
-  const doSync = useCallback(async () => {
-    if (!connection) return;
-    setPhase("syncing");
+    setPhase("connecting");
     setError(null);
 
     try {
-      // 1. Export local data
       const localPayload = await exportAll();
-      setStats({
-        songs: localPayload.songs.length,
-        setlists: localPayload.setlists.length,
+
+      abortRef.current = new AbortController();
+      await syncAsAnswerer({
+        role: "answerer",
+        serverUrl: conn.url,
+        sessionId: conn.session,
+        payload: localPayload,
+        signal: abortRef.current.signal,
+        onConnected: () => setPhase("syncing"),
+        onProgress: (info) => setProgress(info),
+        onReceived: async (remotePayload) => {
+          const res = await importAll(remotePayload as SyncPayload, "merge");
+          setResult(res);
+        },
       });
 
-      // 2. POST local data to server (server merges it)
-      const postResp = await fetch(
-        `${connection.url}/api/sync/data?session=${connection.session}`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(localPayload),
-        }
-      );
-      if (!postResp.ok) {
-        const data = await postResp.json().catch(() => ({}));
-        throw new Error(data.error || `Server returned ${postResp.status}`);
-      }
-      const sent: ImportResult = await postResp.json();
-
-      // 3. GET server data (now includes both server's and mobile's data)
-      const getResp = await fetch(
-        `${connection.url}/api/sync/data?session=${connection.session}`
-      );
-      if (!getResp.ok) {
-        throw new Error(`Failed to fetch server data (${getResp.status})`);
-      }
-      const serverPayload: SyncPayload = await getResp.json();
-
-      // 4. Merge server data into local IndexedDB
-      const received = await importAll(serverPayload, "merge");
-
-      setResult({ received, sent });
       setPhase("done");
     } catch (e) {
-      setError((e as Error).message);
-      setPhase("error");
+      if ((e as Error).message !== "Aborted") {
+        setError((e as Error).message);
+        setPhase("error");
+      }
     }
-  }, [connection]);
+  }, []);
 
   const reset = useCallback(() => {
-    setConnection(null);
+    abortRef.current?.abort();
     setPhase("scan");
     setError(null);
     setResult(null);
-    setStats(null);
+    setProgress(null);
   }, []);
 
   // --- Scan phase ---
@@ -303,8 +324,8 @@ function MobileSync() {
         <main className="flex-1 max-w-2xl mx-auto w-full px-4 py-8">
           <h1 className="text-2xl font-bold text-text mb-2">Data Sync</h1>
           <p className="text-text-muted text-sm mb-6">
-            Scan the QR code shown on the TTabs server to connect. Both
-            devices must be on the same WiFi network.
+            Scan the QR code shown on the TTabs server to sync. Data transfers
+            directly between devices over your local network.
           </p>
           {error && (
             <div className="mb-4 p-3 bg-red-950/30 border border-red-900/50 rounded-xl text-red-400 text-sm">
@@ -317,32 +338,15 @@ function MobileSync() {
     );
   }
 
-  // --- Ready to sync ---
-  if (phase === "ready" && connection) {
+  // --- Connecting ---
+  if (phase === "connecting") {
     return (
       <div className="min-h-screen flex flex-col">
         <Header />
-        <main className="flex-1 max-w-2xl mx-auto w-full px-4 py-8">
-          <h1 className="text-2xl font-bold text-text mb-2">Connected</h1>
-          <p className="text-text-muted text-sm mb-6">
-            Connected to server at <span className="font-mono text-text">{connection.url}</span>.
-            Tap sync to exchange data — songs, setlists, and states will be
-            merged on both devices (newest version wins).
-          </p>
-          <div className="space-y-4">
-            <button
-              onClick={doSync}
-              className="w-full px-5 py-3 bg-accent hover:bg-accent-hover text-white font-medium rounded-xl text-sm transition-colors"
-            >
-              Sync now
-            </button>
-            <button
-              onClick={reset}
-              className="w-full px-4 py-2 bg-bg-card hover:bg-bg-hover border border-bg-border rounded-xl text-text-muted text-sm transition-colors"
-            >
-              Scan a different QR code
-            </button>
-          </div>
+        <main className="flex-1 flex flex-col items-center justify-center px-4">
+          <div className="w-10 h-10 border-2 border-bg-border border-t-accent rounded-full animate-spin mb-4" />
+          <p className="text-text-muted text-sm">Connecting to server...</p>
+          <p className="text-text-dim text-xs mt-1">Establishing peer-to-peer connection</p>
         </main>
       </div>
     );
@@ -354,10 +358,27 @@ function MobileSync() {
       <div className="min-h-screen flex flex-col">
         <Header />
         <main className="flex-1 flex flex-col items-center justify-center px-4">
-          <div className="w-10 h-10 border-2 border-bg-border border-t-accent rounded-full animate-spin mb-4" />
-          <p className="text-text-muted text-sm">
-            {stats ? `Sending ${stats.songs} songs, ${stats.setlists} setlists...` : "Connecting to server..."}
-          </p>
+          {progress ? (
+            <>
+              <p className="text-text text-sm font-medium mb-3">
+                {progress.phase === "sending" ? "Sending data..." : "Receiving data..."}
+              </p>
+              <div className="w-full max-w-xs bg-bg-hover rounded-full h-2 overflow-hidden">
+                <div
+                  className="bg-accent h-full transition-all duration-150"
+                  style={{ width: `${progress.total > 0 ? (progress.current / progress.total) * 100 : 0}%` }}
+                />
+              </div>
+              <p className="text-text-dim text-xs mt-2">
+                {progress.current} / {progress.total} chunks
+              </p>
+            </>
+          ) : (
+            <>
+              <div className="w-10 h-10 border-2 border-bg-border border-t-accent rounded-full animate-spin mb-4" />
+              <p className="text-text-muted text-sm">Exchanging data...</p>
+            </>
+          )}
         </main>
       </div>
     );
@@ -375,18 +396,11 @@ function MobileSync() {
                 <path d="M5 12L10 17L19 7" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
               </svg>
             </div>
-            <h2 className="text-text font-semibold text-base mb-3">Sync complete</h2>
-            <div className="space-y-2 text-sm text-text-muted">
-              <div>
-                <span className="text-text-dim">From server: </span>
-                <span className="text-text font-medium">{result.received.added}</span> added,
-                <span className="text-text font-medium"> {result.received.updated}</span> updated
-              </div>
-              <div>
-                <span className="text-text-dim">To server: </span>
-                <span className="text-text font-medium">{result.sent.added}</span> added,
-                <span className="text-text font-medium"> {result.sent.updated}</span> updated
-              </div>
+            <h2 className="text-text font-semibold text-base mb-2">Sync complete</h2>
+            <div className="flex justify-center gap-4 text-sm text-text-muted">
+              <span><span className="text-text font-medium">{result.added}</span> added</span>
+              <span><span className="text-text font-medium">{result.updated}</span> updated</span>
+              <span><span className="text-text-dim">{result.skipped}</span> skipped</span>
             </div>
           </div>
           <div className="flex gap-3">
@@ -417,22 +431,12 @@ function MobileSync() {
           <div className="p-4 bg-red-950/30 border border-red-900/50 rounded-xl text-red-400 text-sm mb-4">
             {error}
           </div>
-          <div className="space-y-3">
-            {connection && (
-              <button
-                onClick={doSync}
-                className="w-full px-4 py-2.5 bg-accent hover:bg-accent-hover text-white font-medium rounded-xl text-sm transition-colors"
-              >
-                Retry sync
-              </button>
-            )}
-            <button
-              onClick={reset}
-              className="w-full px-4 py-2 bg-bg-card hover:bg-bg-hover border border-bg-border rounded-xl text-text-muted text-sm transition-colors"
-            >
-              Scan again
-            </button>
-          </div>
+          <button
+            onClick={reset}
+            className="px-4 py-2 bg-bg-card hover:bg-bg-hover border border-bg-border rounded-xl text-text-muted text-sm transition-colors"
+          >
+            Scan again
+          </button>
         </main>
       </div>
     );
