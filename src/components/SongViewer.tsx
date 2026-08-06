@@ -65,6 +65,11 @@ export default function SongViewer({ song, isSaved, onSaveToggle, initialState }
   const ytTimeRef = useRef<number | null>(null); // YouTube player time (master clock when available)
   const lineRefs = useRef<(HTMLDivElement | null)[]>([]);
 
+  // 5-second pre-sync countdown: scrolls to the first chord, highlights it,
+  // and shows a visible timer before synced-lyrics scroll begins.
+  const [syncCountdown, setSyncCountdown] = useState<number | null>(null);
+  const [countdownLine, setCountdownLine] = useState<number | null>(null);
+
   // Load saved state on mount. URL-provided initialState (from a shared link)
   // takes priority over the locally saved state.
   useEffect(() => {
@@ -310,6 +315,20 @@ export default function SongViewer({ song, isSaved, onSaveToggle, initialState }
     return Array.from(set);
   }, [parsedLines]);
 
+  // Index of the first parsed line that contains an actual chord token.
+  // Used as the "get ready" target during the pre-sync countdown — the song
+  // doesn't always start with a lyric at the same time as the first chord, so
+  // we jump straight to the first chord the player needs to fret.
+  const firstChordLineIdx = useMemo(() => {
+    for (let i = 0; i < parsedLines.length; i++) {
+      const line = parsedLines[i];
+      if (line.type === "chord" && line.segments.some(seg => seg.chord)) {
+        return i;
+      }
+    }
+    return null;
+  }, [parsedLines]);
+
   // --- Autoscroll ---
   const autoscrollRef = useRef<number | null>(null);
   const lastFrameRef = useRef<number>(0);
@@ -374,6 +393,54 @@ export default function SongViewer({ song, isSaved, onSaveToggle, initialState }
     setSyncPaused(false);
     setActiveSyncLine(null);
   }, []);
+
+  // Cancel any in-progress pre-sync countdown.
+  const cancelSyncCountdown = useCallback(() => {
+    setSyncCountdown(null);
+    setCountdownLine(null);
+  }, []);
+
+  // Toggle synced-lyrics scroll. Starting it runs a 5-second countdown first:
+  // the page jumps to the first chord (which may differ from the first lyric
+  // line), that chord is highlighted, and a visible timer counts down so the
+  // player can get ready. Clicking again during either the countdown or the
+  // sync itself stops everything.
+  const handleToggleSync = useCallback(() => {
+    if (syncScroll || syncCountdown !== null) {
+      cancelSyncCountdown();
+      stopSyncScroll();
+      return;
+    }
+    if (lyricsAlignments.length === 0) return;
+    unlockAudio();
+    const firstIdx = firstChordLineIdx;
+    if (firstIdx !== null) {
+      const el = lineRefs.current[firstIdx];
+      if (el) {
+        el.scrollIntoView({ behavior: "smooth", block: "center" });
+      }
+      setCountdownLine(firstIdx);
+    }
+    setSyncCountdown(5);
+  }, [syncScroll, syncCountdown, lyricsAlignments.length, firstChordLineIdx, cancelSyncCountdown, stopSyncScroll]);
+
+  // Drive the pre-sync countdown. Each tick decrements by 1; once the final
+  // "1" is shown for a full second, the real synced-lyrics scroll starts.
+  useEffect(() => {
+    if (syncCountdown === null) return;
+    if (syncCountdown <= 1) {
+      const id = setTimeout(() => {
+        setCountdownLine(null);
+        setSyncScroll(true);
+        setSyncCountdown(null);
+      }, 1000);
+      return () => clearTimeout(id);
+    }
+    const id = setTimeout(() => {
+      setSyncCountdown(c => (c === null ? null : c - 1));
+    }, 1000);
+    return () => clearTimeout(id);
+  }, [syncCountdown]);
 
   useEffect(() => {
     if (!syncScroll) {
@@ -485,6 +552,11 @@ export default function SongViewer({ song, isSaved, onSaveToggle, initialState }
       if (syncRafRef.current !== null) cancelAnimationFrame(syncRafRef.current);
     };
   }, []);
+
+  // Cancel any pre-sync countdown when the song changes or on unmount.
+  useEffect(() => {
+    return () => cancelSyncCountdown();
+  }, [song.id, cancelSyncCountdown]);
 
   // Stop autoscroll if the user scrolls up manually while it's running.
   useEffect(() => {
@@ -749,19 +821,21 @@ export default function SongViewer({ song, isSaved, onSaveToggle, initialState }
           {lyricsStatus === "found" && (
             <div className="flex items-center gap-2 bg-bg-card border border-bg-border rounded-xl p-1.5">
               <button
-                onClick={() => setSyncScroll(s => !s)}
+                onClick={handleToggleSync}
                 className={`w-8 h-8 flex items-center justify-center rounded-lg transition-colors ${
-                  syncScroll
+                  syncScroll || syncCountdown !== null
                     ? "bg-accent text-white"
                     : "bg-bg-hover hover:bg-bg-border text-text"
                 }`}
-                title={syncScroll ? "Stop synced scroll" : "Scroll synced to lyrics"}
+                title={syncScroll ? "Stop synced scroll" : syncCountdown !== null ? "Cancel countdown" : "Scroll synced to lyrics"}
               >
                 <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
                   <path d="M2 7H4L5 4L7 10L9 5L10 7H12" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
                 </svg>
               </button>
-              <span className="text-text-muted text-xs">Sync</span>
+              <span className="text-text-muted text-xs">
+                {syncCountdown !== null ? `Starting in ${syncCountdown}s` : "Sync"}
+              </span>
               {ytClockActive && (
                 <span className="text-accent text-[10px] font-medium" title="Synced to YouTube playback">
                   YT
@@ -967,7 +1041,8 @@ export default function SongViewer({ song, isSaved, onSaveToggle, initialState }
                 viewMode,
                 handlePlayChord,
                 effectiveCapo,
-                activePlaybackLine ?? activeSyncLine
+                activePlaybackLine ?? activeSyncLine,
+                countdownLine
               )}
             </div>
           ))}
@@ -985,6 +1060,28 @@ export default function SongViewer({ song, isSaved, onSaveToggle, initialState }
           </span>
         )}
       </div>
+
+      {/* Pre-sync countdown overlay — visible during the 5s get-ready window */}
+      {syncCountdown !== null && (
+        <div className="fixed bottom-20 right-4 z-50 flex items-center gap-3 bg-bg-card border border-accent rounded-full shadow-2xl pl-3 pr-1 py-1 print:hidden">
+          <div className="flex items-center justify-center w-9 h-9 rounded-full bg-accent text-white font-bold text-lg leading-none">
+            {syncCountdown}
+          </div>
+          <div className="flex flex-col items-start leading-none">
+            <span className="text-text text-xs font-semibold">Get ready</span>
+            <span className="text-text-dim text-[9px] mt-0.5">Starting sync…</span>
+          </div>
+          <button
+            onClick={handleToggleSync}
+            className="w-9 h-9 flex items-center justify-center bg-red-500/15 hover:bg-red-500/25 text-red-400 rounded-full transition-colors"
+            title="Cancel countdown"
+          >
+            <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor">
+              <rect x="2" y="2" width="8" height="8" rx="1.5" />
+            </svg>
+          </button>
+        </div>
+      )}
 
       {/* Floating sync control — visible while synced scroll is active */}
       {syncScroll && (
@@ -1035,10 +1132,18 @@ function renderLine(
   viewMode: ViewMode,
   onPlayChord: (fingering: ChordFingering) => void,
   capo: number | null,
-  activePlaybackLine: number | null
+  activePlaybackLine: number | null,
+  countdownLine: number | null
 ): React.ReactNode {
   const isActive = activePlaybackLine === lineIdx;
-  const highlight = isActive ? "bg-accent/15 rounded px-1 -mx-1" : "";
+  const isCountdown = countdownLine === lineIdx;
+  // The countdown highlight is stronger so the first chord stands out while
+  // the player gets ready to strum.
+  const highlight = isCountdown
+    ? "bg-accent/30 ring-2 ring-accent rounded px-1 -mx-1 animate-pulse"
+    : isActive
+      ? "bg-accent/15 rounded px-1 -mx-1"
+      : "";
 
   switch (line.type) {
     case "blank":
