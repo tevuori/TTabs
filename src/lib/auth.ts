@@ -20,12 +20,19 @@ export interface Session {
 const SESSION_KEY = "ttabs_session";
 
 // Get the stored session from localStorage (no server validation).
+// Returns null if the session is expired or missing a token field
+// (e.g. stale sessions from the old IndexedDB-based auth).
 export function getSession(): Session | null {
   if (typeof window === "undefined") return null;
   const raw = localStorage.getItem(SESSION_KEY);
   if (!raw) return null;
   try {
     const session = JSON.parse(raw) as Session;
+    if (!session.token) {
+      // Old-format session without a token — clear it.
+      localStorage.removeItem(SESSION_KEY);
+      return null;
+    }
     if (Date.now() > session.expiresAt) {
       localStorage.removeItem(SESSION_KEY);
       return null;

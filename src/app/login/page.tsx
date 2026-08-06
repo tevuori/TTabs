@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { login, getSession, ensureAdminSeeded } from "@/lib/auth";
+import { login, getSession, validateSession } from "@/lib/auth";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -12,13 +12,20 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(false);
   const [checking, setChecking] = useState(true);
 
-  // If already logged in, redirect to home.
+  // If already logged in (validated server-side), redirect to home.
+  // Don't trust localStorage alone — validate before redirecting to avoid
+  // a redirect loop with AuthGuard.
   useEffect(() => {
-    ensureAdminSeeded().then(() => {
-      const session = getSession();
-      if (session) {
+    const local = getSession();
+    if (!local) {
+      setChecking(false);
+      return;
+    }
+    validateSession().then(valid => {
+      if (valid) {
         router.replace("/");
       } else {
+        // validateSession already cleared the stale session.
         setChecking(false);
       }
     });
