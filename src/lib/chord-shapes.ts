@@ -8,8 +8,8 @@ import { parseChord, transposeChord, shouldUseFlats } from "./chords";
 import guitarChordsData from "@tombatossals/chords-db/lib/guitar.json";
 
 interface DbPosition {
-  frets: string; // e.g. "022000" (low E to high E)
-  fingers: string; // e.g. "023000"
+  frets: number[] | string; // chords-db uses number[] (e.g. [0,2,2,0,0,0])
+  fingers: number[] | string;
   baseFret: number;
   barres: number[];
   midi?: number[];
@@ -88,8 +88,19 @@ const chordShapeCache = new Map<string, ChordFingering[]>();
 
 // Convert chords-db position format to our ChordFingering format
 function convertPosition(pos: DbPosition): ChordFingering {
-  const fretsArr = pos.frets.split("").map(f => (f === "x" ? -1 : parseInt(f, 10)));
-  const fingersArr = pos.fingers.split("").map(f => (f === "x" ? 0 : parseInt(f, 10)));
+  // chords-db stores frets/fingers as arrays of numbers (e.g. [0,2,2,0,0,0])
+  // Handle both array and string formats for robustness
+  const rawFrets = Array.isArray(pos.frets) ? pos.frets : String(pos.frets).split("");
+  const rawFingers = Array.isArray(pos.fingers) ? pos.fingers : String(pos.fingers).split("");
+
+  const fretsArr = rawFrets.map(f => {
+    if (typeof f === "number") return f;
+    return f === "x" ? -1 : parseInt(f, 10);
+  });
+  const fingersArr = rawFingers.map(f => {
+    if (typeof f === "number") return f;
+    return f === "x" ? 0 : parseInt(f, 10);
+  });
 
   const result: ChordFingering = {
     frets: fretsArr,
