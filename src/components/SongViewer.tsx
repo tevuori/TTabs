@@ -1,10 +1,11 @@
 "use client";
 
-import { useState, useEffect, useMemo, useCallback } from "react";
-import { SongTab, ChordFingering, ParsedLine, SongState } from "@/lib/types";
+import { useState, useEffect, useMemo, useCallback, useRef } from "react";
+import { SongTab, ChordFingering, ParsedLine, SongState, ViewMode } from "@/lib/types";
 import { parseTabContent } from "@/lib/content-parser";
-import { transposeChord, shouldUseFlats, detectKey } from "@/lib/chords";
+import { transposeChord, shouldUseFlats } from "@/lib/chords";
 import { getChordFingerings, getChordShapes } from "@/lib/chord-shapes";
+import { playChord, unlockAudio } from "@/lib/audio";
 import { saveSong, saveSongState, getSongState, deleteSongState } from "@/lib/storage";
 import ChordToken from "./ChordToken";
 import ChordDiagram from "./ChordDiagram";
@@ -16,12 +17,22 @@ interface SongViewerProps {
   onSaveToggle: () => void;
 }
 
+const DEFAULT_FONT_SIZE = 14;
+const MIN_FONT_SIZE = 11;
+const MAX_FONT_SIZE = 22;
+
 export default function SongViewer({ song, isSaved, onSaveToggle }: SongViewerProps) {
   const [transposition, setTransposition] = useState(0);
   const [chordOverrides, setChordOverrides] = useState<Record<string, number>>({});
   const [capoOverride, setCapoOverride] = useState<number | null>(null);
   const [stateLoaded, setStateLoaded] = useState(false);
   const [showAllChords, setShowAllChords] = useState(true);
+
+  // New Tier 1 UI state
+  const [fontSize, setFontSize] = useState(DEFAULT_FONT_SIZE);
+  const [viewMode, setViewMode] = useState<ViewMode>("both");
+  const [autoscroll, setAutoscroll] = useState(false);
+  const [scrollSpeed, setScrollSpeed] = useState(3); // 1 (slow) .. 10 (fast)
 
   // Load saved state on mount
   useEffect(() => {
@@ -31,6 +42,8 @@ export default function SongViewer({ song, isSaved, onSaveToggle }: SongViewerPr
           setTransposition(state.transposition || 0);
           setChordOverrides(state.chordOverrides || {});
           setCapoOverride(state.capoOverride ?? null);
+          if (typeof state.fontSize === "number") setFontSize(state.fontSize);
+          if (state.viewMode) setViewMode(state.viewMode);
         }
         setStateLoaded(true);
       });
@@ -46,10 +59,12 @@ export default function SongViewer({ song, isSaved, onSaveToggle }: SongViewerPr
       transposition,
       chordOverrides,
       capoOverride,
+      fontSize,
+      viewMode,
       updatedAt: Date.now(),
     };
     saveSongState(song.id, state);
-  }, [transposition, chordOverrides, capoOverride, stateLoaded, song.id]);
+  }, [transposition, chordOverrides, capoOverride, fontSize, viewMode, stateLoaded, song.id]);
 
   // Parse the tab content
   const parsedLines = useMemo(() => parseTabContent(song.content), [song.content]);
@@ -125,11 +140,13 @@ export default function SongViewer({ song, isSaved, onSaveToggle }: SongViewerPr
         transposition,
         chordOverrides,
         capoOverride,
+        fontSize,
+        viewMode,
         updatedAt: Date.now(),
       });
       onSaveToggle();
     }
-  }, [song, transposition, chordOverrides, capoOverride, onSaveToggle]);
+  }, [song, transposition, chordOverrides, capoOverride, fontSize, viewMode, onSaveToggle]);
 
   // Clear saved state
   const handleClearState = useCallback(async () => {
@@ -138,8 +155,21 @@ export default function SongViewer({ song, isSaved, onSaveToggle }: SongViewerPr
       setTransposition(0);
       setChordOverrides({});
       setCapoOverride(null);
+      setFontSize(DEFAULT_FONT_SIZE);
+      setViewMode("both");
     }
   }, [song.id]);
+
+  const effectiveCapo = capoOverride !== null ? capoOverride : song.capo;
+
+  // Play a chord preview (uses the effective capo)
+  const handlePlayChord = useCallback(
+    (fingering: ChordFingering) => {
+      unlockAudio();
+      playChord(fingering, { capo: effectiveCapo ?? 0 });
+    },
+    [effectiveCapo]
+  );
 
   // Unique chords for the chord summary section
   const uniqueChords = useMemo(() => {
@@ -154,7 +184,79 @@ export default function SongViewer({ song, isSaved, onSaveToggle }: SongViewerPr
     return Array.from(set);
   }, [parsedLines]);
 
-  const effectiveCapo = capoOverride !== null ? capoOverride : song.capo;
+  // --- Autoscroll ---
+  const autoscrollRef = useRef<number | null>(null);
+  const lastFrameRef = useRef<number>(0);
+
+  const stopAutoscroll = useCallback(() => {
+    if (autoscrollRef.current !== null) {
+      cancelAnimationFrame(autoscrollRef.current);
+      autoscrollRef.current = null;
+    }
+    setAutoscroll(false);
+  }, []);
+
+  useEffect(() => {
+    if (!autoscroll) {
+      if (autoscrollRef.current !== null) {
+        cancelAnimationFrame(autoscrollRef.current);
+        autoscrollRef.current = null;
+      }
+      lastFrameRef.current = 0;
+      return;
+    }
+
+    const pxPerSec = scrollSpeed * 8; // 1x=8px/s .. 10x=80px/s
+    const step = (ts: number) => {
+      if (lastFrameRef.current === 0) lastFrameRef.current = ts;
+      const dt = (ts - lastFrameRef.current) / 1000;
+      lastFrameRef.current = ts;
+
+      const docHeight = document.documentElement.scrollHeight;
+      const maxScroll = docHeight - window.innerHeight;
+      const current = window.scrollY;
+
+      if (current >= maxScroll - 1) {
+        // Reached the bottom — stop.
+        stopAutoscroll();
+        return;
+      }
+
+      window.scrollBy(0, pxPerSec * dt);
+      autoscrollRef.current = requestAnimationFrame(step);
+    };
+
+    autoscrollRef.current = requestAnimationFrame(step);
+    return () => {
+      if (autoscrollRef.current !== null) {
+        cancelAnimationFrame(autoscrollRef.current);
+        autoscrollRef.current = null;
+      }
+    };
+  }, [autoscroll, scrollSpeed, stopAutoscroll]);
+
+  // Stop autoscroll if the user scrolls up manually while it's running.
+  useEffect(() => {
+    if (!autoscroll) return;
+    let lastY = window.scrollY;
+    const onScroll = () => {
+      const y = window.scrollY;
+      if (y < lastY - 4) {
+        stopAutoscroll();
+      } else {
+        lastY = y;
+      }
+    };
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => window.removeEventListener("scroll", onScroll);
+  }, [autoscroll, stopAutoscroll]);
+
+  // Clean up autoscroll on unmount
+  useEffect(() => {
+    return () => {
+      if (autoscrollRef.current !== null) cancelAnimationFrame(autoscrollRef.current);
+    };
+  }, []);
 
   return (
     <div className="max-w-4xl mx-auto px-4 py-6">
@@ -254,6 +356,83 @@ export default function SongViewer({ song, isSaved, onSaveToggle }: SongViewerPr
             </button>
           </div>
 
+          {/* View mode */}
+          <div className="flex items-center gap-1 bg-bg-card border border-bg-border rounded-xl p-1">
+            {(["both", "chords", "lyrics"] as ViewMode[]).map(mode => (
+              <button
+                key={mode}
+                onClick={() => setViewMode(mode)}
+                className={`px-2.5 py-1.5 rounded-lg text-xs font-medium capitalize transition-colors ${
+                  viewMode === mode
+                    ? "bg-accent text-white"
+                    : "text-text-muted hover:text-text hover:bg-bg-hover"
+                }`}
+              >
+                {mode}
+              </button>
+            ))}
+          </div>
+
+          {/* Font size */}
+          <div className="flex items-center gap-1 bg-bg-card border border-bg-border rounded-xl p-1">
+            <span className="text-text-muted text-xs font-medium px-1">Aa</span>
+            <button
+              onClick={() => setFontSize(f => Math.max(MIN_FONT_SIZE, f - 1))}
+              disabled={fontSize <= MIN_FONT_SIZE}
+              className="w-8 h-8 flex items-center justify-center bg-bg-hover hover:bg-bg-border disabled:opacity-40 rounded-lg text-text transition-colors text-sm font-bold"
+              title="Smaller text"
+            >
+              −
+            </button>
+            <span className="text-text font-mono text-xs min-w-[28px] text-center">{fontSize}</span>
+            <button
+              onClick={() => setFontSize(f => Math.min(MAX_FONT_SIZE, f + 1))}
+              disabled={fontSize >= MAX_FONT_SIZE}
+              className="w-8 h-8 flex items-center justify-center bg-bg-hover hover:bg-bg-border disabled:opacity-40 rounded-lg text-text transition-colors text-sm font-bold"
+              title="Larger text"
+            >
+              +
+            </button>
+          </div>
+
+          {/* Autoscroll */}
+          <div className="flex items-center gap-2 bg-bg-card border border-bg-border rounded-xl p-1.5">
+            <button
+              onClick={() => {
+                unlockAudio();
+                setAutoscroll(a => !a);
+              }}
+              className={`w-8 h-8 flex items-center justify-center rounded-lg transition-colors ${
+                autoscroll
+                  ? "bg-accent text-white"
+                  : "bg-bg-hover hover:bg-bg-border text-text"
+              }`}
+              title={autoscroll ? "Pause autoscroll" : "Start autoscroll"}
+            >
+              {autoscroll ? (
+                <svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor">
+                  <rect x="3" y="2" width="3" height="10" rx="1" />
+                  <rect x="8" y="2" width="3" height="10" rx="1" />
+                </svg>
+              ) : (
+                <svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor">
+                  <path d="M3 2L12 7L3 12V2Z" />
+                </svg>
+              )}
+            </button>
+            <input
+              type="range"
+              min={1}
+              max={10}
+              step={1}
+              value={scrollSpeed}
+              onChange={e => setScrollSpeed(parseInt(e.target.value, 10))}
+              className="w-20 accent-accent"
+              title={`Scroll speed: ${scrollSpeed}x`}
+            />
+            <span className="text-text-muted text-xs font-mono min-w-[24px] text-center">{scrollSpeed}x</span>
+          </div>
+
           <button
             onClick={() => setShowAllChords(!showAllChords)}
             className="px-3 py-2 bg-bg-card hover:bg-bg-hover border border-bg-border rounded-xl text-text-muted text-sm transition-colors"
@@ -261,7 +440,7 @@ export default function SongViewer({ song, isSaved, onSaveToggle }: SongViewerPr
             {showAllChords ? "Hide" : "Show"} Chords
           </button>
 
-          {(transposition !== 0 || Object.keys(chordOverrides).length > 0 || capoOverride !== null) && (
+          {(transposition !== 0 || Object.keys(chordOverrides).length > 0 || capoOverride !== null || fontSize !== DEFAULT_FONT_SIZE || viewMode !== "both") && (
             <button
               onClick={handleClearState}
               className="px-3 py-2 text-text-muted hover:text-accent text-sm transition-colors"
@@ -276,16 +455,27 @@ export default function SongViewer({ song, isSaved, onSaveToggle }: SongViewerPr
       {showAllChords && uniqueChords.length > 0 && (
         <div className="mb-6 bg-bg-card border border-bg-border rounded-xl p-4">
           <h2 className="text-text-muted text-xs font-semibold uppercase tracking-wider mb-3">
-            Chords Used ({uniqueChords.length})
+            Chords Used ({uniqueChords.length}) — click ▶ to hear
           </h2>
           <div className="flex flex-wrap gap-2">
             {uniqueChords.map(originalChord => {
               const { displayName, fingerings, selectedIndex } = getChordWithFingerings(originalChord);
               const fingering = fingerings[selectedIndex] || fingerings[0];
               return (
-                <div key={originalChord} className="bg-bg-hover rounded-lg p-1">
+                <div key={originalChord} className="group relative bg-bg-hover rounded-lg p-1">
                   {fingering ? (
-                    <ChordDiagram chordName={displayName} fingering={fingering} size="small" />
+                    <>
+                      <ChordDiagram chordName={displayName} fingering={fingering} size="small" />
+                      <button
+                        onClick={() => handlePlayChord(fingering)}
+                        className="absolute top-1 right-1 w-6 h-6 flex items-center justify-center bg-bg-card/90 hover:bg-accent hover:text-white text-text-muted rounded-full transition-colors opacity-0 group-hover:opacity-100"
+                        title={`Play ${displayName}`}
+                      >
+                        <svg width="10" height="10" viewBox="0 0 10 10" fill="currentColor">
+                          <path d="M2 1L9 5L2 9V1Z" />
+                        </svg>
+                      </button>
+                    </>
                   ) : (
                     <div className="w-[70px] h-[80px] flex flex-col items-center justify-center">
                       <span className="text-accent font-mono font-semibold text-sm">{displayName}</span>
@@ -300,9 +490,14 @@ export default function SongViewer({ song, isSaved, onSaveToggle }: SongViewerPr
       )}
 
       {/* Tab content */}
-      <div className="bg-bg-card border border-bg-border rounded-xl p-6 overflow-x-auto">
-        <div className="tab-content text-sm">
-          {parsedLines.map((line, lineIdx) => renderLine(line, lineIdx, getChordWithFingerings, handleChordSelect))}
+      <div
+        className="bg-bg-card border border-bg-border rounded-xl p-6 overflow-x-auto"
+        style={{ ["--tab-font-size" as string]: `${fontSize}px` }}
+      >
+        <div className="tab-content" style={{ fontSize: `${fontSize}px` }}>
+          {parsedLines.map((line, lineIdx) =>
+            renderLine(line, lineIdx, getChordWithFingerings, handleChordSelect, viewMode, handlePlayChord, effectiveCapo)
+          )}
         </div>
       </div>
 
@@ -326,7 +521,10 @@ function renderLine(
   line: ParsedLine,
   lineIdx: number,
   getChordWithFingerings: (chord: string) => { displayName: string; fingerings: ChordFingering[]; selectedIndex: number },
-  handleChordSelect: (chord: string, index: number) => void
+  handleChordSelect: (chord: string, index: number) => void,
+  viewMode: ViewMode,
+  onPlayChord: (fingering: ChordFingering) => void,
+  capo: number | null
 ): React.ReactNode {
   switch (line.type) {
     case "blank":
@@ -340,6 +538,8 @@ function renderLine(
       );
 
     case "lyric":
+      // In chords-only mode, hide pure lyric lines.
+      if (viewMode === "chords") return null;
       return (
         <div key={lineIdx} className="text-text">
           {line.text}
@@ -347,6 +547,17 @@ function renderLine(
       );
 
     case "chord":
+      // In lyrics-only mode, render the chord line but strip out chord tokens.
+      if (viewMode === "lyrics") {
+        const text = line.segments
+          .map(seg => (seg.chord ? "" : seg.text))
+          .join("");
+        return (
+          <div key={lineIdx} className="text-text">
+            {text}
+          </div>
+        );
+      }
       return (
         <div key={lineIdx} className="chord-line">
           {line.segments.map((seg, segIdx) => {
@@ -359,6 +570,8 @@ function renderLine(
                   fingerings={fingerings}
                   selectedIndex={selectedIndex}
                   onSelectIndex={(i) => handleChordSelect(seg.chord!, i)}
+                  onPlay={onPlayChord}
+                  capo={capo}
                 />
               );
             }

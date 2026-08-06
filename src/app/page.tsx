@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { SearchResult, Provider, SongTab } from "@/lib/types";
 import SearchBar from "@/components/SearchBar";
 import SearchResults from "@/components/SearchResults";
+import RecentSongs from "@/components/RecentSongs";
 
 export default function HomePage() {
   const router = useRouter();
@@ -108,6 +109,12 @@ export default function HomePage() {
         <div className="w-full mb-8">
           <SearchBar onSearch={handleSearch} loading={loading} />
         </div>
+
+        {results.length === 0 && !loading && !fetchingTab && (
+          <div className="w-full mb-4">
+            <RecentSongs />
+          </div>
+        )}
 
         {tabError && (
           <div className="max-w-2xl w-full mb-4 p-4 bg-red-950/30 border border-red-900/50 rounded-xl text-red-400 text-sm">

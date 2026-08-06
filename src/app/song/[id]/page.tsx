@@ -4,6 +4,7 @@ import { useState, useEffect, use, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { SongTab } from "@/lib/types";
 import { getSong, isSongSaved, saveSong, deleteSong } from "@/lib/storage";
+import { addRecentSong } from "@/lib/recent";
 import SongViewer from "@/components/SongViewer";
 
 export default function SongPage({ params }: { params: Promise<{ id: string }> }) {
@@ -22,6 +23,7 @@ export default function SongPage({ params }: { params: Promise<{ id: string }> }
         setSong(savedSong);
         setSaved(true);
         setLoading(false);
+        addRecentSong(savedSong);
         return;
       }
 
@@ -36,6 +38,7 @@ export default function SongPage({ params }: { params: Promise<{ id: string }> }
             const isSaved = await isSongSaved(id).catch(() => false);
             setSaved(isSaved);
             setLoading(false);
+            addRecentSong(tab);
             return;
           }
         } catch {

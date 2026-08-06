@@ -152,3 +152,36 @@ export function detectKey(chords: string[]): string | null {
 export function keyNoteName(key: string): string {
   return key;
 }
+
+// Normalize a chord name for comparison: root (enharmonic-stable) + quality,
+// ignoring slash bass notes. e.g. "G/B" -> "G", "Am7" -> "Am7", "Db" -> "C#".
+const ENHARMONIC_TO_SHARP: Record<string, string> = {
+  Db: "C#",
+  Eb: "D#",
+  Gb: "F#",
+  Ab: "G#",
+  Bb: "A#",
+};
+
+export function normalizeChordName(chord: string): string {
+  const parsed = parseChord(chord);
+  const root = ENHARMONIC_TO_SHARP[parsed.root] || parsed.root;
+  return root + parsed.quality;
+}
+
+// A common beginner open-chord vocabulary.
+export const BEGINNER_CHORDS = [
+  "G", "C", "D", "Em", "Am", "E", "A", "Dm",
+  "G7", "C7", "D7", "A7", "E7",
+];
+
+// True if every chord in `songChords` is contained in `knownChords`
+// (compared by normalized name so enharmonics/slash basses don't cause misses).
+export function songUsesOnlyKnownChords(
+  songChords: string[],
+  knownChords: string[]
+): boolean {
+  if (songChords.length === 0) return false;
+  const known = new Set(knownChords.map(normalizeChordName));
+  return songChords.every(c => known.has(normalizeChordName(c)));
+}

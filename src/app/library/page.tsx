@@ -1,15 +1,18 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import { SongTab } from "@/lib/types";
 import { getAllSongs, deleteSong } from "@/lib/storage";
+import { BEGINNER_CHORDS, songUsesOnlyKnownChords } from "@/lib/chords";
 
 export default function LibraryPage() {
   const router = useRouter();
   const [songs, setSongs] = useState<SongTab[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
+  const [beginnerMode, setBeginnerMode] = useState(false);
+  const [knownChords, setKnownChords] = useState("");
 
   const loadSongs = useCallback(async () => {
     setLoading(true);
@@ -35,14 +38,39 @@ export default function LibraryPage() {
     []
   );
 
-  const filtered = songs.filter(s => {
-    if (!searchQuery.trim()) return true;
-    const q = searchQuery.toLowerCase();
-    return (
-      s.songName.toLowerCase().includes(q) ||
-      s.artistName.toLowerCase().includes(q)
-    );
-  });
+  // Parse the user's "chords I know" input into a list.
+  const knownChordList = useMemo(() => {
+    const trimmed = knownChords.trim();
+    if (!trimmed) return [] as string[];
+    return trimmed
+      .split(/[,\s]+/)
+      .map(c => c.trim())
+      .filter(Boolean);
+  }, [knownChords]);
+
+  const filtered = useMemo(() => {
+    return songs.filter(s => {
+      // Text filter
+      if (searchQuery.trim()) {
+        const q = searchQuery.toLowerCase();
+        if (
+          !s.songName.toLowerCase().includes(q) &&
+          !s.artistName.toLowerCase().includes(q)
+        ) {
+          return false;
+        }
+      }
+      // Beginner mode: only songs using the beginner chord vocabulary.
+      if (beginnerMode) {
+        if (!songUsesOnlyKnownChords(s.chords || [], BEGINNER_CHORDS)) return false;
+      }
+      // "Chords I know" filter: only songs whose chords are all known.
+      if (knownChordList.length > 0) {
+        if (!songUsesOnlyKnownChords(s.chords || [], knownChordList)) return false;
+      }
+      return true;
+    });
+  }, [songs, searchQuery, beginnerMode, knownChordList]);
 
   return (
     <div className="min-h-screen flex flex-col">
@@ -83,24 +111,81 @@ export default function LibraryPage() {
 
         {/* Search filter */}
         {songs.length > 0 && (
-          <div className="relative mb-6">
-            <svg
-              className="absolute left-3 top-1/2 -translate-y-1/2 text-text-muted"
-              width="16"
-              height="16"
-              viewBox="0 0 16 16"
-              fill="none"
-            >
-              <circle cx="7" cy="7" r="5" stroke="currentColor" strokeWidth="2" />
-              <path d="M11 11L14 14" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-            </svg>
-            <input
-              type="text"
-              value={searchQuery}
-              onChange={e => setSearchQuery(e.target.value)}
-              placeholder="Filter library..."
-              className="w-full pl-10 pr-4 py-2.5 bg-bg-card border border-bg-border rounded-xl text-text placeholder:text-text-dim focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent transition-all text-sm"
-            />
+          <div className="mb-6 space-y-3">
+            <div className="relative">
+              <svg
+                className="absolute left-3 top-1/2 -translate-y-1/2 text-text-muted"
+                width="16"
+                height="16"
+                viewBox="0 0 16 16"
+                fill="none"
+              >
+                <circle cx="7" cy="7" r="5" stroke="currentColor" strokeWidth="2" />
+                <path d="M11 11L14 14" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+              </svg>
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={e => setSearchQuery(e.target.value)}
+                placeholder="Filter library..."
+                className="w-full pl-10 pr-4 py-2.5 bg-bg-card border border-bg-border rounded-xl text-text placeholder:text-text-dim focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent transition-all text-sm"
+              />
+            </div>
+
+            {/* Chord filters */}
+            <div className="flex flex-col sm:flex-row gap-3">
+              {/* Beginner mode toggle */}
+              <button
+                onClick={() => setBeginnerMode(b => !b)}
+                className={`flex items-center gap-2 px-3 py-2 rounded-xl border text-sm font-medium transition-colors ${
+                  beginnerMode
+                    ? "bg-accent/15 border-accent text-accent"
+                    : "bg-bg-card border-bg-border text-text-muted hover:text-text"
+                }`}
+                title="Only show songs using common beginner open chords"
+              >
+                <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+                  <path
+                    d="M5 3V15M9 3V15M13 3V15M3 6H15M3 10H15"
+                    stroke="currentColor"
+                    strokeWidth="1.5"
+                    strokeLinecap="round"
+                  />
+                </svg>
+                Beginner mode
+              </button>
+
+              {/* "Chords I know" input */}
+              <div className="relative flex-1">
+                <svg
+                  className="absolute left-3 top-1/2 -translate-y-1/2 text-text-muted"
+                  width="16"
+                  height="16"
+                  viewBox="0 0 16 16"
+                  fill="none"
+                >
+                  <path
+                    d="M5 3V15M9 3V15M13 3V15M3 6H15M3 10H15"
+                    stroke="currentColor"
+                    strokeWidth="1.5"
+                    strokeLinecap="round"
+                  />
+                </svg>
+                <input
+                  type="text"
+                  value={knownChords}
+                  onChange={e => setKnownChords(e.target.value)}
+                  placeholder="Songs I can play with: G, C, D, Em..."
+                  className="w-full pl-10 pr-4 py-2.5 bg-bg-card border border-bg-border rounded-xl text-text placeholder:text-text-dim focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent transition-all text-sm"
+                />
+              </div>
+            </div>
+
+            {(beginnerMode || knownChordList.length > 0) && (
+              <p className="text-text-dim text-xs">
+                Showing {filtered.length} of {songs.length} songs matching your chord filters.
+              </p>
+            )}
           </div>
         )}
 
@@ -168,6 +253,23 @@ export default function LibraryPage() {
                         {song.type}
                       </span>
                     </div>
+                    {song.chords && song.chords.length > 0 && (
+                      <div className="flex flex-wrap gap-1 mt-2">
+                        {song.chords.slice(0, 12).map(c => (
+                          <span
+                            key={c}
+                            className="px-1.5 py-0.5 bg-bg-hover rounded text-[10px] font-mono text-text-muted"
+                          >
+                            {c}
+                          </span>
+                        ))}
+                        {song.chords.length > 12 && (
+                          <span className="text-[10px] text-text-dim py-0.5">
+                            +{song.chords.length - 12}
+                          </span>
+                        )}
+                      </div>
+                    )}
                   </button>
                   <div className="flex items-center gap-1 flex-shrink-0">
                     <button

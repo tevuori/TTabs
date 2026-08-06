@@ -45,10 +45,14 @@ export interface SongTab {
   capoOverride?: number | null;
 }
 
+export type ViewMode = "both" | "chords" | "lyrics";
+
 export interface SongState {
   transposition: number;
   chordOverrides: Record<string, number>;
   capoOverride: number | null;
+  fontSize?: number; // tab content font size in px
+  viewMode?: ViewMode; // which parts of the song to show
   updatedAt: number;
 }
 
