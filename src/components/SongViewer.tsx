@@ -59,7 +59,6 @@ export default function SongViewer({ song, isSaved, onSaveToggle, initialState }
   const [lyricsAlignments, setLyricsAlignments] = useState<LyricAlignment[]>([]);
   const [syncScroll, setSyncScroll] = useState(false);
   const [lyricsOffset, setLyricsOffset] = useState(0); // seconds, user-adjustable
-  const [activeSyncLine, setActiveSyncLine] = useState<number | null>(null);
   const [ytClockActive, setYtClockActive] = useState(false);
   const [syncPaused, setSyncPaused] = useState(false);
   const syncScrollRef = useRef(false);
@@ -73,11 +72,10 @@ export default function SongViewer({ song, isSaved, onSaveToggle, initialState }
   const ytTimeRef = useRef<number | null>(null); // YouTube player time (master clock when available)
   const lineRefs = useRef<(HTMLDivElement | null)[]>([]);
 
-  // Tempo-synced count-in: scrolls to the first chord, highlights it,
-  // plays metronome clicks at the song's BPM, and shows 4 visual dots
-  // that light up on each beat before synced-lyrics scroll begins.
+  // Tempo-synced count-in: scrolls to the first chord, plays metronome
+  // clicks at the song's BPM, and shows 4 visual dots that light up on
+  // each beat before synced-lyrics scroll begins.
   const [countdownBeat, setCountdownBeat] = useState<number | null>(null);
-  const [countdownLine, setCountdownLine] = useState<number | null>(null);
   const [countInBeats, setCountInBeats] = useState(8); // 4 or 8
   // When true, the backing track should start when the count-in ends.
   const backingPendingRef = useRef(false);
@@ -405,7 +403,6 @@ export default function SongViewer({ song, isSaved, onSaveToggle, initialState }
     }
     setSyncScroll(false);
     setSyncPaused(false);
-    setActiveSyncLine(null);
   }, []);
 
   // --- Backing track (synthesized chords + bass + drums) ---
@@ -454,7 +451,6 @@ export default function SongViewer({ song, isSaved, onSaveToggle, initialState }
   // Cancel any in-progress count-in.
   const cancelSyncCountdown = useCallback(() => {
     setCountdownBeat(null);
-    setCountdownLine(null);
   }, []);
 
   // Play a single metronome click sound via the Web Audio API.
@@ -476,10 +472,9 @@ export default function SongViewer({ song, isSaved, onSaveToggle, initialState }
   }, []);
 
   // Toggle synced-lyrics scroll. Starting it runs a tempo-synced count-in
-  // first: the page jumps to the first chord (which may differ from the
-  // first lyric line), that chord is highlighted, and metronome clicks
-  // play at the song's BPM with 4 visual dots lighting up. Clicking again
-  // during either the count-in or the sync itself stops everything.
+  // first: the page jumps to the first chord, metronome clicks play at the
+  // song's BPM with 4 visual dots lighting up. Clicking again during either
+  // the count-in or the sync itself stops everything.
   const handleToggleSync = useCallback(() => {
     if (syncScroll || countdownBeat !== null) {
       cancelSyncCountdown();
@@ -494,7 +489,6 @@ export default function SongViewer({ song, isSaved, onSaveToggle, initialState }
       if (el) {
         el.scrollIntoView({ behavior: "smooth", block: "center" });
       }
-      setCountdownLine(firstIdx);
     }
     setCountdownBeat(0);
   }, [syncScroll, countdownBeat, lyricsAlignments.length, firstChordLineIdx, cancelSyncCountdown, stopBackingAndSync]);
@@ -513,7 +507,6 @@ export default function SongViewer({ song, isSaved, onSaveToggle, initialState }
     const id = setTimeout(() => {
       if (countdownBeat >= countInBeats - 1) {
         // Last beat finished — start sync scroll and/or backing track.
-        setCountdownLine(null);
         if (syncAlignmentsRef.current.length > 0) {
           setSyncScroll(true);
         }
@@ -535,7 +528,6 @@ export default function SongViewer({ song, isSaved, onSaveToggle, initialState }
         cancelAnimationFrame(syncRafRef.current);
         syncRafRef.current = null;
       }
-      setActiveSyncLine(null);
       return;
     }
     // If no alignments, can't sync.
@@ -570,7 +562,6 @@ export default function SongViewer({ song, isSaved, onSaveToggle, initialState }
 
       if (lineIdx !== null && lineIdx !== lastLine) {
         lastLine = lineIdx;
-        setActiveSyncLine(lineIdx);
         const el = lineRefs.current[lineIdx];
         if (el) {
           el.scrollIntoView({ behavior: "smooth", block: "center" });
@@ -724,12 +715,11 @@ export default function SongViewer({ song, isSaved, onSaveToggle, initialState }
     });
     if (chords.length === 0) return;
     unlockAudio();
-    // Start the count-in: scroll to first chord, highlight it, play clicks.
+    // Start the count-in: scroll to first chord, play clicks.
     const firstIdx = firstChordLineIdx;
     if (firstIdx !== null) {
       const el = lineRefs.current[firstIdx];
       if (el) el.scrollIntoView({ behavior: "smooth", block: "center" });
-      setCountdownLine(firstIdx);
     }
     backingPendingRef.current = true;
     setCountdownBeat(0);
@@ -1253,9 +1243,7 @@ export default function SongViewer({ song, isSaved, onSaveToggle, initialState }
                 viewMode,
                 handlePlayChord,
                 effectiveCapo,
-                activePlaybackLine,
-                activeSyncLine,
-                countdownLine
+                activePlaybackLine
               )}
             </div>
           ))}
@@ -1363,25 +1351,11 @@ function renderLine(
   viewMode: ViewMode,
   onPlayChord: (fingering: ChordFingering) => void,
   capo: number | null,
-  activePlaybackLine: number | null,
-  activeSyncLine: number | null,
-  countdownLine: number | null
+  activePlaybackLine: number | null
 ): React.ReactNode {
   // Playback highlight applies to all line types (chord + lyric).
-  // Sync highlight applies only to lyric lines — chord lines carry both
-  // chords and lyrics, and highlighting the whole line would wash out the
-  // chord tokens. The countdown highlight is strongest and applies to any
-  // line type (it marks the first chord to strum).
-  const isPlaybackActive = activePlaybackLine === lineIdx;
-  const isSyncActive = activeSyncLine === lineIdx;
-  const isCountdown = countdownLine === lineIdx;
-  // The countdown highlight is stronger so the first chord stands out while
-  // the player gets ready to strum.
-  const highlight = isCountdown
-    ? "bg-accent/30 ring-2 ring-accent rounded px-1 -mx-1 animate-pulse"
-    : isPlaybackActive
-      ? "bg-accent/15 rounded px-1 -mx-1"
-      : "";
+  const isActive = activePlaybackLine === lineIdx;
+  const highlight = isActive ? "bg-accent/15 rounded px-1 -mx-1" : "";
 
   switch (line.type) {
     case "blank":
@@ -1397,10 +1371,8 @@ function renderLine(
     case "lyric":
       // In chords-only mode, hide pure lyric lines.
       if (viewMode === "chords") return null;
-      // Sync highlight applies to lyric lines.
-      const lyricHighlight = highlight || (isSyncActive ? "bg-accent/15 rounded px-1 -mx-1" : "");
       return (
-        <div key={lineIdx} className={`text-text ${lyricHighlight}`}>
+        <div key={lineIdx} className={`text-text ${highlight}`}>
           {line.text}
         </div>
       );
@@ -1411,17 +1383,12 @@ function renderLine(
         const text = line.segments
           .map(seg => (seg.chord ? "" : seg.text))
           .join("");
-        // In lyrics mode, chord lines are effectively lyric lines —
-        // sync highlight applies.
-        const lyricModeHighlight = highlight || (isSyncActive ? "bg-accent/15 rounded px-1 -mx-1" : "");
         return (
-          <div key={lineIdx} className={`text-text ${lyricModeHighlight}`}>
+          <div key={lineIdx} className={`text-text ${highlight}`}>
             {text}
           </div>
         );
       }
-      // In chords/both mode, chord lines should NOT get the sync highlight
-      // (only playback and countdown highlights apply).
       return (
         <div key={lineIdx} className={`chord-line ${highlight}`}>
           {line.segments.map((seg, segIdx) => {
