@@ -15,6 +15,7 @@ import {
   moveSongInSetlist,
   Setlist,
 } from "@/lib/storage";
+import { AuthGuard } from "@/components/AuthGuard";
 
 export default function SetlistsPage() {
   const router = useRouter();
@@ -121,8 +122,9 @@ export default function SetlistsPage() {
   );
 
   return (
-    <div className="min-h-screen flex flex-col">
-      <header className="border-b border-bg-border">
+    <AuthGuard>
+      <div className="min-h-screen flex flex-col">
+        <header className="border-b border-bg-border">
         <div className="max-w-6xl mx-auto px-4 py-4 flex items-center justify-between">
           <div className="flex items-center gap-2">
             <div className="w-8 h-8 bg-accent rounded-lg flex items-center justify-center">
@@ -138,6 +140,7 @@ export default function SetlistsPage() {
             <button onClick={() => router.push("/chords")} className="px-3 py-1.5 text-sm font-medium text-text-muted hover:text-accent transition-colors">Chords</button>
             <button onClick={() => router.push("/capo")} className="px-3 py-1.5 text-sm font-medium text-text-muted hover:text-accent transition-colors">Capo</button>
             <button onClick={() => router.push("/setlists")} className="px-3 py-1.5 text-sm font-medium text-text hover:text-accent transition-colors">Setlists</button>
+            <button onClick={() => router.push("/settings")} className="px-3 py-1.5 text-sm font-medium text-text-muted hover:text-accent transition-colors">Settings</button>
           </nav>
         </div>
       </header>
@@ -374,7 +377,8 @@ export default function SetlistsPage() {
             </div>
           </div>
         )}
-      </main>
-    </div>
+        </main>
+      </div>
+    </AuthGuard>
   );
 }

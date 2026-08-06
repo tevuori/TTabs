@@ -7,6 +7,7 @@ import { ChordFingering } from "@/lib/types";
 import ChordDiagram from "@/components/ChordDiagram";
 import Fretboard from "@/components/Fretboard";
 import { playChord, unlockAudio } from "@/lib/audio";
+import { AuthGuard } from "@/components/AuthGuard";
 
 export default function ChordsPage() {
   const router = useRouter();
@@ -44,8 +45,9 @@ export default function ChordsPage() {
   };
 
   return (
-    <div className="min-h-screen flex flex-col">
-      <header className="border-b border-bg-border">
+    <AuthGuard>
+      <div className="min-h-screen flex flex-col">
+        <header className="border-b border-bg-border">
         <div className="max-w-6xl mx-auto px-4 py-4 flex items-center justify-between">
           <div className="flex items-center gap-2">
             <div className="w-8 h-8 bg-accent rounded-lg flex items-center justify-center">
@@ -61,6 +63,7 @@ export default function ChordsPage() {
             <button onClick={() => router.push("/chords")} className="px-3 py-1.5 text-sm font-medium text-text hover:text-accent transition-colors">Chords</button>
             <button onClick={() => router.push("/capo")} className="px-3 py-1.5 text-sm font-medium text-text-muted hover:text-accent transition-colors">Capo</button>
             <button onClick={() => router.push("/setlists")} className="px-3 py-1.5 text-sm font-medium text-text-muted hover:text-accent transition-colors">Setlists</button>
+            <button onClick={() => router.push("/settings")} className="px-3 py-1.5 text-sm font-medium text-text-muted hover:text-accent transition-colors">Settings</button>
           </nav>
         </div>
       </header>
@@ -181,7 +184,8 @@ export default function ChordsPage() {
             )}
           </div>
         </div>
-      </main>
-    </div>
+        </main>
+      </div>
+    </AuthGuard>
   );
 }

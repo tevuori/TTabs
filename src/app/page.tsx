@@ -6,6 +6,7 @@ import { SearchResult, Provider, SongTab } from "@/lib/types";
 import SearchBar from "@/components/SearchBar";
 import SearchResults from "@/components/SearchResults";
 import RecentSongs from "@/components/RecentSongs";
+import { AuthGuard } from "@/components/AuthGuard";
 
 export default function HomePage() {
   const router = useRouter();
@@ -64,6 +65,7 @@ export default function HomePage() {
   );
 
   return (
+    <AuthGuard>
     <div className="min-h-screen flex flex-col">
       {/* Header */}
       <header className="border-b border-bg-border">
@@ -106,6 +108,12 @@ export default function HomePage() {
               className="px-3 py-1.5 text-sm font-medium text-text-muted hover:text-accent transition-colors"
             >
               Setlists
+            </button>
+            <button
+              onClick={() => router.push("/settings")}
+              className="px-3 py-1.5 text-sm font-medium text-text-muted hover:text-accent transition-colors"
+            >
+              Settings
             </button>
           </nav>
         </div>
@@ -164,5 +172,6 @@ export default function HomePage() {
         </div>
       </footer>
     </div>
+    </AuthGuard>
   );
 }

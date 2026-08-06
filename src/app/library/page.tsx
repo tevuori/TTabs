@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { SongTab } from "@/lib/types";
 import { getAllSongs, deleteSong } from "@/lib/storage";
 import { BEGINNER_CHORDS, songUsesOnlyKnownChords } from "@/lib/chords";
+import { AuthGuard } from "@/components/AuthGuard";
 
 export default function LibraryPage() {
   const router = useRouter();
@@ -73,8 +74,9 @@ export default function LibraryPage() {
   }, [songs, searchQuery, beginnerMode, knownChordList]);
 
   return (
-    <div className="min-h-screen flex flex-col">
-      {/* Header */}
+    <AuthGuard>
+      <div className="min-h-screen flex flex-col">
+        {/* Header */}
       <header className="border-b border-bg-border">
         <div className="max-w-6xl mx-auto px-4 py-4 flex items-center justify-between">
           <div className="flex items-center gap-2">
@@ -115,6 +117,12 @@ export default function LibraryPage() {
               className="px-3 py-1.5 text-sm font-medium text-text-muted hover:text-accent transition-colors"
             >
               Setlists
+            </button>
+            <button
+              onClick={() => router.push("/settings")}
+              className="px-3 py-1.5 text-sm font-medium text-text-muted hover:text-accent transition-colors"
+            >
+              Settings
             </button>
           </nav>
         </div>
@@ -314,7 +322,8 @@ export default function LibraryPage() {
             ))}
           </div>
         )}
-      </main>
-    </div>
+        </main>
+      </div>
+    </AuthGuard>
   );
 }

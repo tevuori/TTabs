@@ -7,6 +7,7 @@ import { getSong, isSongSaved, saveSong, deleteSong } from "@/lib/storage";
 import { addRecentSong } from "@/lib/recent";
 import { decodeStateFromQuery } from "@/lib/share";
 import SongViewer from "@/components/SongViewer";
+import { AuthGuard } from "@/components/AuthGuard";
 
 export default function SongPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
@@ -94,8 +95,9 @@ export default function SongPage({ params }: { params: Promise<{ id: string }> }
   }
 
   return (
-    <div className="min-h-screen">
-      <header className="border-b border-bg-border sticky top-0 bg-bg/90 backdrop-blur-sm z-40">
+    <AuthGuard>
+      <div className="min-h-screen">
+        <header className="border-b border-bg-border sticky top-0 bg-bg/90 backdrop-blur-sm z-40">
         <div className="max-w-6xl mx-auto px-4 py-3 flex items-center justify-between">
           <button
             onClick={() => router.push("/")}
@@ -119,16 +121,23 @@ export default function SongPage({ params }: { params: Promise<{ id: string }> }
             >
               Setlists
             </button>
+            <button
+              onClick={() => router.push("/settings")}
+              className="px-3 py-1.5 text-sm font-medium text-text-muted hover:text-accent transition-colors"
+            >
+              Settings
+            </button>
           </div>
         </div>
       </header>
 
-      <SongViewer
-        song={song}
-        isSaved={saved}
-        onSaveToggle={() => setSaved(true)}
-        initialState={initialState}
-      />
-    </div>
+        <SongViewer
+          song={song}
+          isSaved={saved}
+          onSaveToggle={() => setSaved(true)}
+          initialState={initialState}
+        />
+      </div>
+    </AuthGuard>
   );
 }
