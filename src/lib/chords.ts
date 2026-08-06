@@ -153,6 +153,83 @@ export function keyNoteName(key: string): string {
   return key;
 }
 
+// --- Fretboard visualization support ---
+
+// Standard tuning note names per string (low E to high E), as pitch classes.
+const STRING_ROOT_PC = [4, 9, 2, 7, 11, 4]; // E A D G B E (mod 12)
+
+// Pitch-class -> note name (sharps).
+const PC_TO_NAME = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
+
+// Compute the chord tones (as pitch classes) for a chord name.
+// Uses a simplified quality -> interval set map covering common qualities.
+const QUALITY_INTERVALS: Record<string, number[]> = {
+  "": [0, 4, 7], // major
+  m: [0, 3, 7], // minor
+  maj7: [0, 4, 7, 11],
+  m7: [0, 3, 7, 10],
+  "7": [0, 4, 7, 10],
+  sus2: [0, 2, 7],
+  sus4: [0, 5, 7],
+  "7sus4": [0, 5, 7, 10],
+  dim: [0, 3, 6],
+  dim7: [0, 3, 6, 9],
+  aug: [0, 4, 8],
+  "6": [0, 4, 7, 9],
+  m6: [0, 3, 7, 9],
+  "9": [0, 4, 7, 10, 2],
+  m9: [0, 3, 7, 10, 2],
+  add9: [0, 4, 7, 2],
+  madd9: [0, 3, 7, 2],
+  maj9: [0, 4, 7, 11, 2],
+  m7b5: [0, 3, 6, 10],
+  "11": [0, 4, 7, 10, 2, 5],
+  "13": [0, 4, 7, 10, 2, 5, 9],
+};
+
+export interface FretboardNote {
+  string: number; // 0 = low E, 5 = high E
+  fret: number;
+  noteName: string; // e.g. "G"
+  pc: number; // pitch class 0-11
+  isRoot: boolean;
+  isChordTone: boolean;
+}
+
+// Compute all positions of a chord's tones across the fretboard (0-12 frets).
+export function getFretboardNotes(
+  chordName: string,
+  maxFret: number = 12
+): FretboardNote[] {
+  const parsed = parseChord(chordName);
+  const rootPc = noteIndex(parsed.root);
+  if (rootPc === -1) return [];
+
+  const intervals = QUALITY_INTERVALS[parsed.quality];
+  if (!intervals) return []; // unknown quality — don't guess
+
+  const chordPcs = new Set(intervals.map(i => (rootPc + i) % 12));
+  const notes: FretboardNote[] = [];
+
+  for (let string = 0; string < 6; string++) {
+    const stringPc = STRING_ROOT_PC[string];
+    for (let fret = 0; fret <= maxFret; fret++) {
+      const pc = (stringPc + fret) % 12;
+      if (chordPcs.has(pc)) {
+        notes.push({
+          string,
+          fret,
+          noteName: PC_TO_NAME[pc],
+          pc,
+          isRoot: pc === rootPc,
+          isChordTone: true,
+        });
+      }
+    }
+  }
+  return notes;
+}
+
 // Normalize a chord name for comparison: root (enharmonic-stable) + quality,
 // ignoring slash bass notes. e.g. "G/B" -> "G", "Am7" -> "Am7", "Db" -> "C#".
 const ENHARMONIC_TO_SHARP: Record<string, string> = {

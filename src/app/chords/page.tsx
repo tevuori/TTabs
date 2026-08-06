@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { getChordLibrary, getChordPositions } from "@/lib/chord-shapes";
 import { ChordFingering } from "@/lib/types";
 import ChordDiagram from "@/components/ChordDiagram";
+import Fretboard from "@/components/Fretboard";
 import { playChord, unlockAudio } from "@/lib/audio";
 
 export default function ChordsPage() {
@@ -13,6 +14,7 @@ export default function ChordsPage() {
 
   const [query, setQuery] = useState("");
   const [selected, setSelected] = useState<{ root: string; suffix: string; display: string } | null>(null);
+  const [detailView, setDetailView] = useState<"voicings" | "fretboard">("voicings");
 
   // Filter the library by the search query (matches display name).
   const filtered = useMemo(() => {
@@ -125,11 +127,36 @@ export default function ChordsPage() {
               </div>
             ) : (
               <div className="bg-bg-card border border-bg-border rounded-xl p-4">
-                <div className="flex items-center justify-between mb-4">
+                <div className="flex items-center justify-between mb-3">
                   <h3 className="text-text font-bold text-lg font-mono">{selected.display}</h3>
-                  <span className="text-text-dim text-xs">{positions.length} voicing{positions.length !== 1 ? "s" : ""}</span>
+                  <div className="flex items-center gap-1">
+                    <button
+                      onClick={() => setDetailView("voicings")}
+                      className={`px-2 py-1 rounded text-xs font-medium transition-colors ${
+                        detailView === "voicings" ? "bg-bg-hover text-text" : "text-text-dim hover:text-text-muted"
+                      }`}
+                    >
+                      Voicings
+                    </button>
+                    <button
+                      onClick={() => setDetailView("fretboard")}
+                      className={`px-2 py-1 rounded text-xs font-medium transition-colors ${
+                        detailView === "fretboard" ? "bg-bg-hover text-text" : "text-text-dim hover:text-text-muted"
+                      }`}
+                    >
+                      Fretboard
+                    </button>
+                  </div>
                 </div>
-                {positions.length === 0 ? (
+
+                {detailView === "fretboard" ? (
+                  <div>
+                    <Fretboard chordName={selected.display} maxFret={12} />
+                    <p className="text-text-dim text-[10px] text-center mt-2">
+                      All {selected.display} tones across the neck (root in orange)
+                    </p>
+                  </div>
+                ) : positions.length === 0 ? (
                   <p className="text-text-muted text-sm">No voicings available.</p>
                 ) : (
                   <div className="grid grid-cols-2 gap-3 max-h-[60vh] overflow-y-auto pr-1">

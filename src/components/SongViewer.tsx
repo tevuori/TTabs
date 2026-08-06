@@ -6,11 +6,13 @@ import { parseTabContent } from "@/lib/content-parser";
 import { transposeChord, shouldUseFlats } from "@/lib/chords";
 import { getChordFingerings, getChordShapes } from "@/lib/chord-shapes";
 import { playChord, unlockAudio } from "@/lib/audio";
+import { SongPlayer, extractPlaybackChords } from "@/lib/playback";
 import { saveSong, saveSongState, getSongState, deleteSongState } from "@/lib/storage";
 import { buildShareableUrl } from "@/lib/share";
 import ChordToken from "./ChordToken";
 import ChordDiagram from "./ChordDiagram";
 import TransposeControls from "./TransposeControls";
+import YouTubePlayer from "./YouTubePlayer";
 
 interface SongViewerProps {
   song: SongTab;
@@ -35,6 +37,13 @@ export default function SongViewer({ song, isSaved, onSaveToggle, initialState }
   const [viewMode, setViewMode] = useState<ViewMode>("both");
   const [autoscroll, setAutoscroll] = useState(false);
   const [scrollSpeed, setScrollSpeed] = useState(3); // 1 (slow) .. 10 (fast)
+
+  // Tier 3: song playback
+  const [playbackBpm, setPlaybackBpm] = useState(80);
+  const [beatsPerChord, setBeatsPerChord] = useState(4);
+  const [playing, setPlaying] = useState(false);
+  const [activePlaybackLine, setActivePlaybackLine] = useState<number | null>(null);
+  const playerRef = useRef<import("@/lib/playback").SongPlayer | null>(null);
 
   // Load saved state on mount. URL-provided initialState (from a shared link)
   // takes priority over the locally saved state.
@@ -291,6 +300,46 @@ export default function SongViewer({ song, isSaved, onSaveToggle, initialState }
     };
   }, []);
 
+  // --- Song playback (Tier 3) ---
+  const stopPlayback = useCallback(() => {
+    playerRef.current?.stop();
+    playerRef.current = null;
+    setPlaying(false);
+    setActivePlaybackLine(null);
+  }, []);
+
+  const handleTogglePlayback = useCallback(() => {
+    if (playing) {
+      stopPlayback();
+      return;
+    }
+    const chords = extractPlaybackChords(parsedLines, (chordName) => {
+      const { displayName, fingerings } = getChordWithFingerings(chordName);
+      return { name: displayName, fingerings };
+    });
+    if (chords.length === 0) return;
+    unlockAudio();
+    const player = new SongPlayer(chords, {
+      bpm: playbackBpm,
+      beatsPerChord,
+      capo: effectiveCapo ?? 0,
+      onChord: (c) => setActivePlaybackLine(c ? c.lineIndex : null),
+      onEnd: () => {
+        setPlaying(false);
+        setActivePlaybackLine(null);
+        playerRef.current = null;
+      },
+    });
+    playerRef.current = player;
+    player.start();
+    setPlaying(true);
+  }, [playing, parsedLines, getChordWithFingerings, playbackBpm, beatsPerChord, effectiveCapo, stopPlayback]);
+
+  // Stop playback if the song changes or on unmount.
+  useEffect(() => {
+    return () => stopPlayback();
+  }, [song.id, stopPlayback]);
+
   return (
     <div className="max-w-4xl mx-auto px-4 py-6 print-area">
       {/* Header */}
@@ -487,6 +536,58 @@ export default function SongViewer({ song, isSaved, onSaveToggle, initialState }
             <span className="text-text-muted text-xs font-mono min-w-[24px] text-center">{scrollSpeed}x</span>
           </div>
 
+          {/* Song playback */}
+          <div className="flex items-center gap-2 bg-bg-card border border-bg-border rounded-xl p-1.5">
+            <button
+              onClick={handleTogglePlayback}
+              className={`w-8 h-8 flex items-center justify-center rounded-lg transition-colors ${
+                playing ? "bg-accent text-white" : "bg-bg-hover hover:bg-bg-border text-text"
+              }`}
+              title={playing ? "Stop playback" : "Play song (strum through chords)"}
+            >
+              {playing ? (
+                <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor">
+                  <rect x="2" y="2" width="3" height="8" rx="1" />
+                  <rect x="7" y="2" width="3" height="8" rx="1" />
+                </svg>
+              ) : (
+                <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor">
+                  <path d="M2 1L11 6L2 11V1Z" />
+                </svg>
+              )}
+            </button>
+            <div className="flex flex-col gap-0.5 px-1">
+              <label className="text-text-dim text-[9px] uppercase tracking-wider leading-none">
+                BPM {playbackBpm}
+              </label>
+              <input
+                type="range"
+                min={50}
+                max={180}
+                value={playbackBpm}
+                onChange={e => setPlaybackBpm(parseInt(e.target.value, 10))}
+                className="w-16 accent-accent"
+                title="Playback tempo"
+              />
+            </div>
+            <div className="flex items-center gap-0.5">
+              <span className="text-text-dim text-[9px] uppercase tracking-wider px-1">beats</span>
+              {[2, 3, 4, 6].map(n => (
+                <button
+                  key={n}
+                  onClick={() => setBeatsPerChord(n)}
+                  className={`w-6 h-6 rounded text-[10px] font-mono font-medium transition-colors ${
+                    beatsPerChord === n
+                      ? "bg-accent text-white"
+                      : "bg-bg-hover text-text-muted hover:text-text"
+                  }`}
+                >
+                  {n}
+                </button>
+              ))}
+            </div>
+          </div>
+
           <button
             onClick={() => setShowAllChords(!showAllChords)}
             className="px-3 py-2 bg-bg-card hover:bg-bg-hover border border-bg-border rounded-xl text-text-muted text-sm transition-colors"
@@ -516,6 +617,11 @@ export default function SongViewer({ song, isSaved, onSaveToggle, initialState }
             </button>
           )}
         </div>
+      </div>
+
+      {/* YouTube sync + section looping */}
+      <div className="mb-4 print:hidden">
+        <YouTubePlayer query={`${song.artistName} ${song.songName}`} />
       </div>
 
       {/* Chord summary — all unique chords with diagrams */}
@@ -563,7 +669,16 @@ export default function SongViewer({ song, isSaved, onSaveToggle, initialState }
       >
         <div className="tab-content" style={{ fontSize: `${fontSize}px` }}>
           {parsedLines.map((line, lineIdx) =>
-            renderLine(line, lineIdx, getChordWithFingerings, handleChordSelect, viewMode, handlePlayChord, effectiveCapo)
+            renderLine(
+              line,
+              lineIdx,
+              getChordWithFingerings,
+              handleChordSelect,
+              viewMode,
+              handlePlayChord,
+              effectiveCapo,
+              activePlaybackLine
+            )
           )}
         </div>
       </div>
@@ -591,8 +706,12 @@ function renderLine(
   handleChordSelect: (chord: string, index: number) => void,
   viewMode: ViewMode,
   onPlayChord: (fingering: ChordFingering) => void,
-  capo: number | null
+  capo: number | null,
+  activePlaybackLine: number | null
 ): React.ReactNode {
+  const isActive = activePlaybackLine === lineIdx;
+  const highlight = isActive ? "bg-accent/15 rounded px-1 -mx-1" : "";
+
   switch (line.type) {
     case "blank":
       return <div key={lineIdx} className="h-4" />;
@@ -608,7 +727,7 @@ function renderLine(
       // In chords-only mode, hide pure lyric lines.
       if (viewMode === "chords") return null;
       return (
-        <div key={lineIdx} className="text-text">
+        <div key={lineIdx} className={`text-text ${highlight}`}>
           {line.text}
         </div>
       );
@@ -620,13 +739,13 @@ function renderLine(
           .map(seg => (seg.chord ? "" : seg.text))
           .join("");
         return (
-          <div key={lineIdx} className="text-text">
+          <div key={lineIdx} className={`text-text ${highlight}`}>
             {text}
           </div>
         );
       }
       return (
-        <div key={lineIdx} className="chord-line">
+        <div key={lineIdx} className={`chord-line ${highlight}`}>
           {line.segments.map((seg, segIdx) => {
             if (seg.chord) {
               const { displayName, fingerings, selectedIndex } = getChordWithFingerings(seg.chord);

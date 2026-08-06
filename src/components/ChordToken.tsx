@@ -4,6 +4,7 @@ import { useState, useRef, useEffect } from "react";
 import { ChordFingering } from "@/lib/types";
 import { playChord, unlockAudio } from "@/lib/audio";
 import ChordDiagram from "./ChordDiagram";
+import Fretboard from "./Fretboard";
 
 interface ChordTokenProps {
   chordName: string;
@@ -24,6 +25,7 @@ export default function ChordToken({
   capo,
 }: ChordTokenProps) {
   const [open, setOpen] = useState(false);
+  const [view, setView] = useState<"diagram" | "fretboard">("diagram");
   const ref = useRef<HTMLSpanElement>(null);
   const popoverRef = useRef<HTMLDivElement>(null);
 
@@ -74,23 +76,54 @@ export default function ChordToken({
           className="absolute z-50 left-1/2 -translate-x-1/2 top-full mt-2 bg-bg-card border border-bg-border rounded-lg shadow-2xl p-3 slide-down"
           style={{ minWidth: "200px" }}
         >
-          {/* Chord diagram + play button */}
-          {currentFingering ? (
-            <div className="flex justify-center mb-2 relative">
-              <ChordDiagram chordName={chordName} fingering={currentFingering} size="medium" />
+          {/* View toggle */}
+          <div className="flex items-center gap-1 mb-2">
+            <button
+              onClick={() => setView("diagram")}
+              className={`px-2 py-1 rounded text-xs font-medium transition-colors ${
+                view === "diagram" ? "bg-bg-hover text-text" : "text-text-dim hover:text-text-muted"
+              }`}
+            >
+              Diagram
+            </button>
+            <button
+              onClick={() => setView("fretboard")}
+              className={`px-2 py-1 rounded text-xs font-medium transition-colors ${
+                view === "fretboard" ? "bg-bg-hover text-text" : "text-text-dim hover:text-text-muted"
+              }`}
+            >
+              Fretboard
+            </button>
+            {currentFingering && (
               <button
                 onClick={handlePlay}
-                className="absolute top-0 right-0 w-7 h-7 flex items-center justify-center bg-bg-hover hover:bg-accent hover:text-white text-text-muted rounded-full transition-colors"
+                className="ml-auto w-7 h-7 flex items-center justify-center bg-bg-hover hover:bg-accent hover:text-white text-text-muted rounded-full transition-colors"
                 title={`Play ${chordName}`}
               >
                 <svg width="11" height="11" viewBox="0 0 11 11" fill="currentColor">
                   <path d="M2 1L10 5.5L2 10V1Z" />
                 </svg>
               </button>
-            </div>
+            )}
+          </div>
+
+          {/* Chord diagram or full fretboard */}
+          {view === "diagram" ? (
+            currentFingering ? (
+              <div className="flex justify-center mb-2">
+                <ChordDiagram chordName={chordName} fingering={currentFingering} size="medium" />
+              </div>
+            ) : (
+              <div className="text-text-muted text-sm text-center py-4">
+                No fingering data available for {chordName}
+              </div>
+            )
           ) : (
-            <div className="text-text-muted text-sm text-center py-4">
-              No fingering data available for {chordName}
+            <div className="mb-2 max-w-[340px]">
+              <Fretboard chordName={chordName} maxFret={12} />
+              <p className="text-text-dim text-[10px] text-center mt-1">
+                All {chordName} tones across the neck (root in orange)
+              </p>
             </div>
           )}
 
