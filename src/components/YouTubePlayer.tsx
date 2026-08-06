@@ -11,6 +11,9 @@ interface YouTubeResult {
 interface YouTubePlayerProps {
   // The search query (typically "Artist Name Song Name").
   query: string;
+  // Called ~4x/sec with the player's current time (seconds) while playing.
+  // null when paused/stopped. Used by the parent to drive synced scroll.
+  onTimeUpdate?: (time: number | null) => void;
 }
 
 // Loads the YouTube IFrame API once.
@@ -37,7 +40,7 @@ function loadYouTubeAPI(): Promise<void> {
 
 // A YouTube player with A/B section looping.
 // Lets the user search for a video, play it, and set loop start/end points.
-export default function YouTubePlayer({ query }: YouTubePlayerProps) {
+export default function YouTubePlayer({ query, onTimeUpdate }: YouTubePlayerProps) {
   const [open, setOpen] = useState(false);
   const [results, setResults] = useState<YouTubeResult[]>([]);
   const [searching, setSearching] = useState(false);
@@ -132,6 +135,7 @@ export default function YouTubePlayer({ query }: YouTubePlayerProps) {
         clearInterval(timeTimerRef.current);
         timeTimerRef.current = null;
       }
+      onTimeUpdate?.(null);
       return;
     }
     timeTimerRef.current = window.setInterval(() => {
@@ -142,6 +146,7 @@ export default function YouTubePlayer({ query }: YouTubePlayerProps) {
       if (!p) return;
       const t = p.getCurrentTime();
       setCurrentTime(t);
+      onTimeUpdate?.(t);
       if (looping && loopA !== null && loopB !== null && t >= loopB) {
         p.seekTo(loopA, true);
       }
@@ -152,7 +157,7 @@ export default function YouTubePlayer({ query }: YouTubePlayerProps) {
         timeTimerRef.current = null;
       }
     };
-  }, [ready, playing, looping, loopA, loopB]);
+  }, [ready, playing, looping, loopA, loopB, onTimeUpdate]);
 
   const togglePlay = useCallback(() => {
     const p = playerRef.current as { playVideo?: () => void; pauseVideo?: () => void } | null;

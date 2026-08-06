@@ -7,6 +7,7 @@ import { transposeChord, shouldUseFlats } from "@/lib/chords";
 import { getChordFingerings, getChordShapes } from "@/lib/chord-shapes";
 import { playChord, unlockAudio } from "@/lib/audio";
 import { SongPlayer, extractPlaybackChords } from "@/lib/playback";
+import { parseLrc, alignLyrics, lineAtTime, type LyricAlignment } from "@/lib/lyrics";
 import { saveSong, saveSongState, getSongState, deleteSongState } from "@/lib/storage";
 import { buildShareableUrl } from "@/lib/share";
 import ChordToken from "./ChordToken";
@@ -44,6 +45,21 @@ export default function SongViewer({ song, isSaved, onSaveToggle, initialState }
   const [playing, setPlaying] = useState(false);
   const [activePlaybackLine, setActivePlaybackLine] = useState<number | null>(null);
   const playerRef = useRef<import("@/lib/playback").SongPlayer | null>(null);
+
+  // Synced-lyrics scroll
+  const [lyricsStatus, setLyricsStatus] = useState<"idle" | "fetching" | "found" | "none" | "error">("idle");
+  const [lyricsAlignments, setLyricsAlignments] = useState<LyricAlignment[]>([]);
+  const [syncScroll, setSyncScroll] = useState(false);
+  const [lyricsOffset, setLyricsOffset] = useState(0); // seconds, user-adjustable
+  const [activeSyncLine, setActiveSyncLine] = useState<number | null>(null);
+  const [ytClockActive, setYtClockActive] = useState(false);
+  const syncScrollRef = useRef(false);
+  const syncOffsetRef = useRef(0);
+  const syncAlignmentsRef = useRef<LyricAlignment[]>([]);
+  const syncRafRef = useRef<number | null>(null);
+  const syncStartRef = useRef(0); // performance.now() reference for internal clock
+  const ytTimeRef = useRef<number | null>(null); // YouTube player time (master clock when available)
+  const lineRefs = useRef<(HTMLDivElement | null)[]>([]);
 
   // Load saved state on mount. URL-provided initialState (from a shared link)
   // takes priority over the locally saved state.
@@ -88,6 +104,61 @@ export default function SongViewer({ song, isSaved, onSaveToggle, initialState }
 
   // Parse the tab content
   const parsedLines = useMemo(() => parseTabContent(song.content), [song.content]);
+
+  // Fetch synced lyrics from LRCLib when the song loads.
+  useEffect(() => {
+    setLyricsStatus("fetching");
+    setLyricsAlignments([]);
+    setSyncScroll(false);
+    let cancelled = false;
+    fetch(`/api/lyrics?track_name=${encodeURIComponent(song.songName)}&artist_name=${encodeURIComponent(song.artistName)}`)
+      .then(r => r.json())
+      .then(data => {
+        if (cancelled) return;
+        if (data.error) {
+          setLyricsStatus("error");
+          return;
+        }
+        if (data.instrumental) {
+          setLyricsStatus("none");
+          return;
+        }
+        if (!data.syncedLyrics) {
+          setLyricsStatus("none");
+          return;
+        }
+        const lrcLines = parseLrc(data.syncedLyrics);
+        if (lrcLines.length === 0) {
+          setLyricsStatus("none");
+          return;
+        }
+        const alignments = alignLyrics(lrcLines, parsedLines);
+        if (alignments.length < 3) {
+          // Too few matches to be useful — alignment probably failed.
+          setLyricsStatus("none");
+          return;
+        }
+        setLyricsAlignments(alignments);
+        setLyricsStatus("found");
+      })
+      .catch(() => {
+        if (!cancelled) setLyricsStatus("error");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [song.songName, song.artistName, parsedLines]);
+
+  // Keep refs in sync for the rAF loop.
+  useEffect(() => {
+    syncScrollRef.current = syncScroll;
+  }, [syncScroll]);
+  useEffect(() => {
+    syncOffsetRef.current = lyricsOffset;
+  }, [lyricsOffset]);
+  useEffect(() => {
+    syncAlignmentsRef.current = lyricsAlignments;
+  }, [lyricsAlignments]);
 
   // Determine the effective key (with transposition)
   const useFlats = shouldUseFlats(song.key);
@@ -276,6 +347,106 @@ export default function SongViewer({ song, isSaved, onSaveToggle, initialState }
       }
     };
   }, [autoscroll, scrollSpeed, stopAutoscroll]);
+
+  // --- Synced-lyrics scroll ---
+  // Uses an internal clock (performance.now) to drive scroll to each aligned
+  // line at its LRC timestamp. A user-adjustable offset lets them nudge the
+  // sync if the lyrics are slightly ahead/behind.
+  const stopSyncScroll = useCallback(() => {
+    if (syncRafRef.current !== null) {
+      cancelAnimationFrame(syncRafRef.current);
+      syncRafRef.current = null;
+    }
+    setSyncScroll(false);
+    setActiveSyncLine(null);
+  }, []);
+
+  useEffect(() => {
+    if (!syncScroll) {
+      if (syncRafRef.current !== null) {
+        cancelAnimationFrame(syncRafRef.current);
+        syncRafRef.current = null;
+      }
+      setActiveSyncLine(null);
+      return;
+    }
+    // If no alignments, can't sync.
+    if (syncAlignmentsRef.current.length === 0) {
+      stopSyncScroll();
+      return;
+    }
+    // Disable constant autoscroll — sync takes over.
+    setAutoscroll(false);
+
+    syncStartRef.current = performance.now();
+    let lastLine: number | null = null;
+
+    const step = () => {
+      if (!syncScrollRef.current) return;
+      // Use YouTube player time as the master clock when available (true
+      // audio sync, self-corrects on seek). Fall back to internal clock.
+      const ytTime = ytTimeRef.current;
+      const elapsed = ytTime !== null
+        ? ytTime
+        : (performance.now() - syncStartRef.current) / 1000;
+      const adjustedTime = elapsed - syncOffsetRef.current;
+      const lineIdx = lineAtTime(syncAlignmentsRef.current, adjustedTime);
+
+      if (lineIdx !== null && lineIdx !== lastLine) {
+        lastLine = lineIdx;
+        setActiveSyncLine(lineIdx);
+        const el = lineRefs.current[lineIdx];
+        if (el) {
+          el.scrollIntoView({ behavior: "smooth", block: "center" });
+        }
+      }
+
+      // Stop when we've passed the last alignment + 5s.
+      const lastAlign = syncAlignmentsRef.current[syncAlignmentsRef.current.length - 1];
+      if (adjustedTime > lastAlign.time + 5) {
+        stopSyncScroll();
+        return;
+      }
+
+      syncRafRef.current = requestAnimationFrame(step);
+    };
+
+    syncRafRef.current = requestAnimationFrame(step);
+    return () => {
+      if (syncRafRef.current !== null) {
+        cancelAnimationFrame(syncRafRef.current);
+        syncRafRef.current = null;
+      }
+    };
+  }, [syncScroll, stopSyncScroll]);
+
+  // Resync: tap to set the offset so the current line is "now".
+  const handleResync = useCallback(() => {
+    if (syncAlignmentsRef.current.length === 0) return;
+    // Find the alignment closest to the current scroll position.
+    const viewportCenter = window.scrollY + window.innerHeight / 2;
+    let closest = syncAlignmentsRef.current[0];
+    let closestDist = Infinity;
+    for (const a of syncAlignmentsRef.current) {
+      const el = lineRefs.current[a.lineIndex];
+      if (!el) continue;
+      const dist = Math.abs(el.offsetTop - viewportCenter);
+      if (dist < closestDist) {
+        closestDist = dist;
+        closest = a;
+      }
+    }
+    const elapsed = (performance.now() - syncStartRef.current) / 1000;
+    // Set offset so that adjustedTime == closest.time right now.
+    setLyricsOffset(elapsed - closest.time);
+  }, []);
+
+  // Clean up sync scroll on unmount.
+  useEffect(() => {
+    return () => {
+      if (syncRafRef.current !== null) cancelAnimationFrame(syncRafRef.current);
+    };
+  }, []);
 
   // Stop autoscroll if the user scrolls up manually while it's running.
   useEffect(() => {
@@ -536,6 +707,77 @@ export default function SongViewer({ song, isSaved, onSaveToggle, initialState }
             <span className="text-text-muted text-xs font-mono min-w-[24px] text-center">{scrollSpeed}x</span>
           </div>
 
+          {/* Synced-lyrics scroll */}
+          {lyricsStatus === "found" && (
+            <div className="flex items-center gap-2 bg-bg-card border border-bg-border rounded-xl p-1.5">
+              <button
+                onClick={() => setSyncScroll(s => !s)}
+                className={`w-8 h-8 flex items-center justify-center rounded-lg transition-colors ${
+                  syncScroll
+                    ? "bg-accent text-white"
+                    : "bg-bg-hover hover:bg-bg-border text-text"
+                }`}
+                title={syncScroll ? "Stop synced scroll" : "Scroll synced to lyrics"}
+              >
+                <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+                  <path d="M2 7H4L5 4L7 10L9 5L10 7H12" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+              </button>
+              <span className="text-text-muted text-xs">Sync</span>
+              {ytClockActive && (
+                <span className="text-accent text-[10px] font-medium" title="Synced to YouTube playback">
+                  YT
+                </span>
+              )}
+              {syncScroll && (
+                <>
+                  <button
+                    onClick={handleResync}
+                    className="px-2 py-1 bg-bg-hover hover:bg-bg-border rounded text-text-muted text-xs transition-colors"
+                    title="Set offset so the line nearest the viewport center is 'now'"
+                  >
+                    ↺ Resync
+                  </button>
+                  <div className="flex items-center gap-1">
+                    <button
+                      onClick={() => setLyricsOffset(o => o - 0.5)}
+                      className="w-5 h-5 flex items-center justify-center bg-bg-hover hover:bg-bg-border rounded text-text-dim text-xs transition-colors"
+                      title="Lyrics earlier by 0.5s"
+                    >
+                      −
+                    </button>
+                    <span className="text-text-dim text-[10px] font-mono min-w-[32px] text-center">
+                      {lyricsOffset > 0 ? "+" : ""}{lyricsOffset.toFixed(1)}s
+                    </span>
+                    <button
+                      onClick={() => setLyricsOffset(o => o + 0.5)}
+                      className="w-5 h-5 flex items-center justify-center bg-bg-hover hover:bg-bg-border rounded text-text-dim text-xs transition-colors"
+                      title="Lyrics later by 0.5s"
+                    >
+                      +
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
+          )}
+          {(lyricsStatus === "fetching" || lyricsStatus === "none" || lyricsStatus === "error") && (
+            <div className="flex items-center gap-1.5 px-2 py-1 text-text-dim text-xs" title={
+              lyricsStatus === "fetching" ? "Searching LRCLib for synced lyrics..." :
+              lyricsStatus === "none" ? "No synced lyrics found for this song" :
+              "Couldn't fetch lyrics"
+            }>
+              {lyricsStatus === "fetching" && (
+                <>
+                  <div className="w-3 h-3 border border-bg-border border-t-accent rounded-full animate-spin" />
+                  <span>Finding lyrics...</span>
+                </>
+              )}
+              {lyricsStatus === "none" && <span>No synced lyrics</span>}
+              {lyricsStatus === "error" && <span>Lyrics unavailable</span>}
+            </div>
+          )}
+
           {/* Song playback */}
           <div className="flex items-center gap-2 bg-bg-card border border-bg-border rounded-xl p-1.5">
             <button
@@ -621,7 +863,13 @@ export default function SongViewer({ song, isSaved, onSaveToggle, initialState }
 
       {/* YouTube sync + section looping */}
       <div className="mb-4 print:hidden">
-        <YouTubePlayer query={`${song.artistName} ${song.songName}`} />
+        <YouTubePlayer
+          query={`${song.artistName} ${song.songName}`}
+          onTimeUpdate={(time) => {
+            ytTimeRef.current = time;
+            setYtClockActive(time !== null);
+          }}
+        />
       </div>
 
       {/* Chord summary — all unique chords with diagrams */}
@@ -668,18 +916,23 @@ export default function SongViewer({ song, isSaved, onSaveToggle, initialState }
         style={{ ["--tab-font-size" as string]: `${fontSize}px` }}
       >
         <div className="tab-content" style={{ fontSize: `${fontSize}px` }}>
-          {parsedLines.map((line, lineIdx) =>
-            renderLine(
-              line,
-              lineIdx,
-              getChordWithFingerings,
-              handleChordSelect,
-              viewMode,
-              handlePlayChord,
-              effectiveCapo,
-              activePlaybackLine
-            )
-          )}
+          {parsedLines.map((line, lineIdx) => (
+            <div
+              key={lineIdx}
+              ref={el => { lineRefs.current[lineIdx] = el; }}
+            >
+              {renderLine(
+                line,
+                lineIdx,
+                getChordWithFingerings,
+                handleChordSelect,
+                viewMode,
+                handlePlayChord,
+                effectiveCapo,
+                activePlaybackLine ?? activeSyncLine
+              )}
+            </div>
+          ))}
         </div>
       </div>
 
