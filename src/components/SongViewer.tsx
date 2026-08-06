@@ -53,11 +53,15 @@ export default function SongViewer({ song, isSaved, onSaveToggle, initialState }
   const [lyricsOffset, setLyricsOffset] = useState(0); // seconds, user-adjustable
   const [activeSyncLine, setActiveSyncLine] = useState<number | null>(null);
   const [ytClockActive, setYtClockActive] = useState(false);
+  const [syncPaused, setSyncPaused] = useState(false);
   const syncScrollRef = useRef(false);
   const syncOffsetRef = useRef(0);
   const syncAlignmentsRef = useRef<LyricAlignment[]>([]);
   const syncRafRef = useRef<number | null>(null);
   const syncStartRef = useRef(0); // performance.now() reference for internal clock
+  const syncPausedRef = useRef(false);
+  const syncPauseTimeRef = useRef(0); // accumulated paused duration in ms
+  const syncPauseStartRef = useRef(0); // when the current pause started
   const ytTimeRef = useRef<number | null>(null); // YouTube player time (master clock when available)
   const lineRefs = useRef<(HTMLDivElement | null)[]>([]);
 
@@ -159,6 +163,15 @@ export default function SongViewer({ song, isSaved, onSaveToggle, initialState }
   useEffect(() => {
     syncAlignmentsRef.current = lyricsAlignments;
   }, [lyricsAlignments]);
+  useEffect(() => {
+    syncPausedRef.current = syncPaused;
+    if (syncPaused) {
+      syncPauseStartRef.current = performance.now();
+    } else if (syncPauseStartRef.current > 0) {
+      syncPauseTimeRef.current += performance.now() - syncPauseStartRef.current;
+      syncPauseStartRef.current = 0;
+    }
+  }, [syncPaused]);
 
   // Determine the effective key (with transposition)
   const useFlats = shouldUseFlats(song.key);
@@ -358,6 +371,7 @@ export default function SongViewer({ song, isSaved, onSaveToggle, initialState }
       syncRafRef.current = null;
     }
     setSyncScroll(false);
+    setSyncPaused(false);
     setActiveSyncLine(null);
   }, []);
 
@@ -379,16 +393,24 @@ export default function SongViewer({ song, isSaved, onSaveToggle, initialState }
     setAutoscroll(false);
 
     syncStartRef.current = performance.now();
+    syncPauseTimeRef.current = 0;
+    syncPauseStartRef.current = 0;
     let lastLine: number | null = null;
 
     const step = () => {
       if (!syncScrollRef.current) return;
+      // When paused, keep the rAF alive but don't advance the clock.
+      if (syncPausedRef.current) {
+        syncRafRef.current = requestAnimationFrame(step);
+        return;
+      }
       // Use YouTube player time as the master clock when available (true
-      // audio sync, self-corrects on seek). Fall back to internal clock.
+      // audio sync, self-corrects on seek). Fall back to internal clock,
+      // subtracting accumulated paused duration.
       const ytTime = ytTimeRef.current;
       const elapsed = ytTime !== null
         ? ytTime
-        : (performance.now() - syncStartRef.current) / 1000;
+        : (performance.now() - syncStartRef.current - syncPauseTimeRef.current) / 1000;
       const adjustedTime = elapsed - syncOffsetRef.current;
       const lineIdx = lineAtTime(syncAlignmentsRef.current, adjustedTime);
 
@@ -440,6 +462,22 @@ export default function SongViewer({ song, isSaved, onSaveToggle, initialState }
     // Set offset so that adjustedTime == closest.time right now.
     setLyricsOffset(elapsed - closest.time);
   }, []);
+
+  // Spacebar toggles sync pause/resume (only when sync is active and the
+  // user isn't typing in an input/textarea).
+  useEffect(() => {
+    if (!syncScroll) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.code !== "Space") return;
+      const target = e.target as HTMLElement;
+      const tag = target?.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA" || target?.isContentEditable) return;
+      e.preventDefault();
+      setSyncPaused(p => !p);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [syncScroll]);
 
   // Clean up sync scroll on unmount.
   useEffect(() => {
@@ -947,6 +985,43 @@ export default function SongViewer({ song, isSaved, onSaveToggle, initialState }
           </span>
         )}
       </div>
+
+      {/* Floating sync control — visible while synced scroll is active */}
+      {syncScroll && (
+        <div className="fixed bottom-20 right-4 z-50 flex items-center gap-2 bg-bg-card border border-bg-border rounded-full shadow-2xl pl-2 pr-1 py-1 print:hidden">
+          <button
+            onClick={() => setSyncPaused(p => !p)}
+            className="w-9 h-9 flex items-center justify-center rounded-full transition-colors"
+            title={syncPaused ? "Resume (Space)" : "Pause (Space)"}
+          >
+            {syncPaused ? (
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" className="text-accent">
+                <path d="M4 2L13 8L4 14V2Z" />
+              </svg>
+            ) : (
+              <svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor" className="text-text">
+                <rect x="3" y="2" width="3" height="10" rx="1" />
+                <rect x="8" y="2" width="3" height="10" rx="1" />
+              </svg>
+            )}
+          </button>
+          <div className="flex flex-col items-start leading-none">
+            <span className="text-text text-xs font-semibold">
+              {syncPaused ? "Paused" : "Syncing"}
+            </span>
+            <span className="text-text-dim text-[9px] mt-0.5">Space to {syncPaused ? "resume" : "pause"}</span>
+          </div>
+          <button
+            onClick={stopSyncScroll}
+            className="w-9 h-9 flex items-center justify-center bg-red-500/15 hover:bg-red-500/25 text-red-400 rounded-full transition-colors"
+            title="Stop sync"
+          >
+            <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor">
+              <rect x="2" y="2" width="8" height="8" rx="1.5" />
+            </svg>
+          </button>
+        </div>
+      )}
     </div>
   );
 }
