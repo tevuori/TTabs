@@ -204,3 +204,108 @@ export function getTransposedChordFingerings(
   const fingerings = getChordShapes(transposedName);
   return { chordName: transposedName, fingerings };
 }
+
+// --- Chord library browser support ---
+
+// Reverse of NOTE_TO_DB_KEY: db key -> display note name.
+const DB_KEY_TO_NOTE: Record<string, string> = {
+  C: "C",
+  Csharp: "C#",
+  D: "D",
+  Eb: "Eb",
+  E: "E",
+  F: "F",
+  Fsharp: "F#",
+  G: "G",
+  Ab: "Ab",
+  A: "A",
+  Bb: "Bb",
+  B: "B",
+};
+
+// Friendly display names for chords-db suffixes.
+const SUFFIX_DISPLAY: Record<string, string> = {
+  major: "",
+  minor: "m",
+  dim: "dim",
+  dim7: "dim7",
+  sus2: "sus2",
+  sus4: "sus4",
+  "7sus4": "7sus4",
+  aug: "aug",
+  "6": "6",
+  "69": "69",
+  "7": "7",
+  "7b5": "7b5",
+  aug7: "aug7",
+  "9": "9",
+  "9b5": "9b5",
+  aug9: "aug9",
+  "7b9": "7b9",
+  "7#9": "7#9",
+  "11": "11",
+  "13": "13",
+  maj7: "maj7",
+  maj9: "maj9",
+  maj11: "maj11",
+  maj13: "maj13",
+  m6: "m6",
+  m7: "m7",
+  m9: "m9",
+  m11: "m11",
+  m13: "m13",
+  mmaj7: "mMaj7",
+  m7b5: "m7b5",
+  add9: "add9",
+  madd9: "madd9",
+};
+
+// A browseable list of every root + quality available in the database.
+export interface ChordLibraryEntry {
+  dbKey: string;
+  root: string; // display name e.g. "C#"
+  suffix: string; // db suffix e.g. "major"
+  display: string; // friendly name e.g. "C#", "Am", "G7"
+  positionCount: number;
+}
+
+let libraryCache: ChordLibraryEntry[] | null = null;
+
+export function getChordLibrary(): ChordLibraryEntry[] {
+  if (libraryCache) return libraryCache;
+
+  const entries: ChordLibraryEntry[] = [];
+  for (const [dbKey, chordList] of Object.entries(chordDbData.chords)) {
+    const root = DB_KEY_TO_NOTE[dbKey] || dbKey;
+    for (const chord of chordList) {
+      const display = root + (SUFFIX_DISPLAY[chord.suffix] ?? chord.suffix);
+      entries.push({
+        dbKey,
+        root,
+        suffix: chord.suffix,
+        display,
+        positionCount: chord.positions.length,
+      });
+    }
+  }
+  // Sort by pitch class (C, C#, D, ...) then by quality complexity.
+  const noteOrder = ["C", "C#", "D", "Eb", "E", "F", "F#", "G", "Ab", "A", "Bb", "B"];
+  entries.sort((a, b) => {
+    const ni = noteOrder.indexOf(a.root) - noteOrder.indexOf(b.root);
+    if (ni !== 0) return ni;
+    return a.display.localeCompare(b.display);
+  });
+
+  libraryCache = entries;
+  return entries;
+}
+
+// Get all positions for a specific root + suffix, already converted.
+export function getChordPositions(root: string, suffix: string): ChordFingering[] {
+  const dbKey = NOTE_TO_DB_KEY[root] || root;
+  const list = chordDbData.chords[dbKey];
+  if (!list) return [];
+  const match = list.find(c => c.suffix === suffix);
+  if (!match) return [];
+  return match.positions.map(convertPosition);
+}

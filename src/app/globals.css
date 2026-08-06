@@ -109,3 +109,74 @@ a {
 .slide-down {
   animation: slideDown 0.15s ease-out;
 }
+
+/* --- Print / PDF export --- */
+@media print {
+  html,
+  body {
+    background: #fff !important;
+    color: #000 !important;
+  }
+
+  /* Hide everything by default, then reveal only the print area. */
+  body * {
+    visibility: hidden;
+  }
+  .print-area,
+  .print-area * {
+    visibility: visible;
+  }
+  .print-area {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+    padding: 0;
+    margin: 0;
+    background: #fff !important;
+    color: #000 !important;
+  }
+
+  /* Strip the dark card backgrounds/borders for print. */
+  .print-area .bg-bg-card,
+  .print-area .bg-bg-hover {
+    background: #fff !important;
+    border-color: #000 !important;
+  }
+
+  /* Tab content: black text, monospace, no card chrome. */
+  .print-area .tab-content,
+  .print-area .chord-line {
+    color: #000 !important;
+    font-size: 13px !important;
+    line-height: 1.5 !important;
+  }
+  .print-area .chord-token {
+    color: #c2410c !important;
+    font-weight: 700 !important;
+  }
+  .print-area .text-text,
+  .print-area .text-text-muted,
+  .print-area .text-text-dim {
+    color: #000 !important;
+  }
+  .print-area .text-accent {
+    color: #c2410c !important;
+  }
+
+  /* Avoid breaking chord lines across pages. */
+  .chord-line,
+  .tab-content > div {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
+  /* Chord diagrams print fine as SVG; keep them compact. */
+  .print-area .chord-diagram {
+    break-inside: avoid;
+  }
+
+  @page {
+    margin: 1.5cm;
+  }
+}

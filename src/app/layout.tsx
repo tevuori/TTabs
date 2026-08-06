@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import "./globals.css";
+import MetronomeWidget from "@/components/MetronomeWidget";
 
 export const metadata: Metadata = {
   title: "TTabs — Guitar Tabs & Chords",
@@ -21,7 +22,10 @@ export default function RootLayout({
           rel="stylesheet"
         />
       </head>
-      <body>{children}</body>
+      <body>
+        {children}
+        <MetronomeWidget />
+      </body>
     </html>
   );
 }

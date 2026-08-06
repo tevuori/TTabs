@@ -185,3 +185,65 @@ export function songUsesOnlyKnownChords(
   const known = new Set(knownChords.map(normalizeChordName));
   return songChords.every(c => known.has(normalizeChordName(c)));
 }
+
+// Find capo positions that let you play `songChords` using only shapes from
+// `knownChords`. Returns each viable capo fret with the shape you'd use for
+// every song chord (i.e. the chord you finger, which sounds as the real chord
+// once the capo is applied).
+export interface CapoSolution {
+  capo: number;
+  // song chord -> the open shape you'd finger to sound it
+  shapes: Record<string, string>;
+  // how many of the song's chords are playable with this capo
+  matched: number;
+  total: number;
+}
+
+export function findCapoSolutions(
+  songChords: string[],
+  knownChords: string[],
+  maxCapo: number = 7
+): CapoSolution[] {
+  if (songChords.length === 0 || knownChords.length === 0) return [];
+
+  const uniqueSong = Array.from(new Set(songChords));
+  const knownNotes = knownChords.map(c => {
+    const p = parseChord(c);
+    return { note: noteIndex(p.root), quality: p.quality, raw: c };
+  });
+
+  const solutions: CapoSolution[] = [];
+
+  for (let capo = 0; capo <= maxCapo; capo++) {
+    const shapes: Record<string, string> = {};
+    let matched = 0;
+
+    for (const songChord of uniqueSong) {
+      const p = parseChord(songChord);
+      const songNote = noteIndex(p.root);
+      if (songNote === -1) continue;
+
+      // To sound `songChord` with capo `capo`, you finger a shape whose
+      // open pitch is `capo` semitones lower: shapeNote = songNote - capo.
+      const shapeNote = ((songNote - capo) % 12 + 12) % 12;
+
+      const known = knownNotes.find(
+        k => k.note === shapeNote && k.quality === p.quality
+      );
+      if (known) {
+        shapes[songChord] = known.raw;
+        matched++;
+      }
+    }
+
+    if (matched > 0) {
+      solutions.push({ capo, shapes, matched, total: uniqueSong.length });
+    }
+  }
+
+  // Best matches first (most chords covered), then lowest capo.
+  solutions.sort((a, b) =>
+    b.matched - a.matched || a.capo - b.capo
+  );
+  return solutions;
+}

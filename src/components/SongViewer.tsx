@@ -7,6 +7,7 @@ import { transposeChord, shouldUseFlats } from "@/lib/chords";
 import { getChordFingerings, getChordShapes } from "@/lib/chord-shapes";
 import { playChord, unlockAudio } from "@/lib/audio";
 import { saveSong, saveSongState, getSongState, deleteSongState } from "@/lib/storage";
+import { buildShareableUrl } from "@/lib/share";
 import ChordToken from "./ChordToken";
 import ChordDiagram from "./ChordDiagram";
 import TransposeControls from "./TransposeControls";
@@ -15,13 +16,14 @@ interface SongViewerProps {
   song: SongTab;
   isSaved: boolean;
   onSaveToggle: () => void;
+  initialState?: Partial<SongState> | null;
 }
 
 const DEFAULT_FONT_SIZE = 14;
 const MIN_FONT_SIZE = 11;
 const MAX_FONT_SIZE = 22;
 
-export default function SongViewer({ song, isSaved, onSaveToggle }: SongViewerProps) {
+export default function SongViewer({ song, isSaved, onSaveToggle, initialState }: SongViewerProps) {
   const [transposition, setTransposition] = useState(0);
   const [chordOverrides, setChordOverrides] = useState<Record<string, number>>({});
   const [capoOverride, setCapoOverride] = useState<number | null>(null);
@@ -34,7 +36,8 @@ export default function SongViewer({ song, isSaved, onSaveToggle }: SongViewerPr
   const [autoscroll, setAutoscroll] = useState(false);
   const [scrollSpeed, setScrollSpeed] = useState(3); // 1 (slow) .. 10 (fast)
 
-  // Load saved state on mount
+  // Load saved state on mount. URL-provided initialState (from a shared link)
+  // takes priority over the locally saved state.
   useEffect(() => {
     if (song.id) {
       getSongState(song.id).then(state => {
@@ -45,12 +48,20 @@ export default function SongViewer({ song, isSaved, onSaveToggle }: SongViewerPr
           if (typeof state.fontSize === "number") setFontSize(state.fontSize);
           if (state.viewMode) setViewMode(state.viewMode);
         }
+        // Apply URL state last so it wins.
+        if (initialState) {
+          if (typeof initialState.transposition === "number") setTransposition(initialState.transposition);
+          if (initialState.chordOverrides) setChordOverrides(initialState.chordOverrides);
+          if (initialState.capoOverride !== undefined) setCapoOverride(initialState.capoOverride);
+          if (typeof initialState.fontSize === "number") setFontSize(initialState.fontSize);
+          if (initialState.viewMode) setViewMode(initialState.viewMode);
+        }
         setStateLoaded(true);
       });
     } else {
       setStateLoaded(true);
     }
-  }, [song.id]);
+  }, [song.id, initialState]);
 
   // Auto-save state when it changes (after initial load)
   useEffect(() => {
@@ -171,6 +182,28 @@ export default function SongViewer({ song, isSaved, onSaveToggle }: SongViewerPr
     [effectiveCapo]
   );
 
+  // --- Shareable link ---
+  const [shareCopied, setShareCopied] = useState(false);
+
+  const handleShare = useCallback(async () => {
+    const path = buildShareableUrl(song.id, {
+      transposition,
+      chordOverrides,
+      capoOverride,
+      fontSize,
+      viewMode,
+    });
+    const url = `${window.location.origin}${path}`;
+    try {
+      await navigator.clipboard.writeText(url);
+      setShareCopied(true);
+      setTimeout(() => setShareCopied(false), 1800);
+    } catch {
+      // Fallback: select the URL in a prompt so the user can copy manually.
+      window.prompt("Copy this link to share:", url);
+    }
+  }, [song.id, transposition, chordOverrides, capoOverride, fontSize, viewMode]);
+
   // Unique chords for the chord summary section
   const uniqueChords = useMemo(() => {
     const set = new Set<string>();
@@ -259,7 +292,7 @@ export default function SongViewer({ song, isSaved, onSaveToggle }: SongViewerPr
   }, []);
 
   return (
-    <div className="max-w-4xl mx-auto px-4 py-6">
+    <div className="max-w-4xl mx-auto px-4 py-6 print-area">
       {/* Header */}
       <div className="mb-6">
         <div className="flex items-start justify-between gap-4 mb-3">
@@ -267,7 +300,7 @@ export default function SongViewer({ song, isSaved, onSaveToggle }: SongViewerPr
             <h1 className="text-2xl font-bold text-text truncate">{song.songName}</h1>
             <p className="text-text-muted text-lg truncate">{song.artistName}</p>
           </div>
-          <div className="flex items-center gap-2 flex-shrink-0">
+          <div className="flex items-center gap-2 flex-shrink-0 print:hidden">
             <button
               onClick={handleSaveState}
               className={`px-4 py-2 rounded-lg font-medium text-sm transition-all ${
@@ -291,6 +324,27 @@ export default function SongViewer({ song, isSaved, onSaveToggle }: SongViewerPr
                 <path d="M14 2L7 9" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
               </svg>
             </a>
+            <button
+              onClick={handleShare}
+              className={`px-3 py-2 border rounded-lg text-sm transition-colors flex items-center gap-1.5 ${
+                shareCopied
+                  ? "bg-accent/15 border-accent text-accent"
+                  : "bg-bg-card hover:bg-bg-hover border-bg-border text-text-muted"
+              }`}
+              title="Copy a shareable link with your current setup"
+            >
+              {shareCopied ? (
+                <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                  <path d="M3 8L7 12L13 4" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+              ) : (
+                <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                  <path d="M6 9V4C6 2.9 6.9 2 8 2H12C13.1 2 14 2.9 14 4V8C14 9.1 13.1 10 12 10H10" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+                  <path d="M10 7V12C10 13.1 9.1 14 8 14H4C2.9 14 2 13.1 2 12V8C2 6.9 2.9 6 4 6H6" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+                </svg>
+              )}
+              {shareCopied ? "Copied" : "Share"}
+            </button>
           </div>
         </div>
 
@@ -327,7 +381,7 @@ export default function SongViewer({ song, isSaved, onSaveToggle }: SongViewerPr
         </div>
 
         {/* Controls */}
-        <div className="flex flex-wrap items-center gap-3">
+        <div className="flex flex-wrap items-center gap-3 print:hidden">
           <TransposeControls
             transposition={transposition}
             onTranspose={setTransposition}
@@ -440,6 +494,19 @@ export default function SongViewer({ song, isSaved, onSaveToggle }: SongViewerPr
             {showAllChords ? "Hide" : "Show"} Chords
           </button>
 
+          <button
+            onClick={() => window.print()}
+            className="px-3 py-2 bg-bg-card hover:bg-bg-hover border border-bg-border rounded-xl text-text-muted text-sm transition-colors flex items-center gap-1.5"
+            title="Print or save as PDF"
+          >
+            <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+              <path d="M3 5V1H11V5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+              <path d="M3 9H1V5H13V9H11" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+              <path d="M3 7H11V13H3V7Z" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+            Print / PDF
+          </button>
+
           {(transposition !== 0 || Object.keys(chordOverrides).length > 0 || capoOverride !== null || fontSize !== DEFAULT_FONT_SIZE || viewMode !== "both") && (
             <button
               onClick={handleClearState}
@@ -502,7 +569,7 @@ export default function SongViewer({ song, isSaved, onSaveToggle }: SongViewerPr
       </div>
 
       {/* Footer */}
-      <div className="mt-6 flex items-center justify-between text-xs text-text-dim">
+      <div className="mt-6 flex items-center justify-between text-xs text-text-dim print:hidden">
         <span>
           Provider: <span className="text-text-muted capitalize">{song.provider}</span>
         </span>

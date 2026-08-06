@@ -98,6 +98,24 @@ export default function LibraryPage() {
             >
               Library
             </button>
+            <button
+              onClick={() => router.push("/chords")}
+              className="px-3 py-1.5 text-sm font-medium text-text-muted hover:text-accent transition-colors"
+            >
+              Chords
+            </button>
+            <button
+              onClick={() => router.push("/capo")}
+              className="px-3 py-1.5 text-sm font-medium text-text-muted hover:text-accent transition-colors"
+            >
+              Capo
+            </button>
+            <button
+              onClick={() => router.push("/setlists")}
+              className="px-3 py-1.5 text-sm font-medium text-text-muted hover:text-accent transition-colors"
+            >
+              Setlists
+            </button>
           </nav>
         </div>
       </header>

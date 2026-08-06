@@ -2,9 +2,10 @@
 
 import { useState, useEffect, use, useCallback } from "react";
 import { useRouter } from "next/navigation";
-import { SongTab } from "@/lib/types";
+import { SongTab, SongState } from "@/lib/types";
 import { getSong, isSongSaved, saveSong, deleteSong } from "@/lib/storage";
 import { addRecentSong } from "@/lib/recent";
+import { decodeStateFromQuery } from "@/lib/share";
 import SongViewer from "@/components/SongViewer";
 
 export default function SongPage({ params }: { params: Promise<{ id: string }> }) {
@@ -14,6 +15,13 @@ export default function SongPage({ params }: { params: Promise<{ id: string }> }
   const [saved, setSaved] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [initialState, setInitialState] = useState<Partial<SongState> | null>(null);
+
+  // Parse any shared state from the URL once on mount.
+  useEffect(() => {
+    const fromUrl = decodeStateFromQuery(window.location.search);
+    if (fromUrl) setInitialState(fromUrl);
+  }, []);
 
   useEffect(() => {
     async function loadSong() {
@@ -105,11 +113,22 @@ export default function SongPage({ params }: { params: Promise<{ id: string }> }
             >
               Library
             </button>
+            <button
+              onClick={() => router.push("/setlists")}
+              className="px-3 py-1.5 text-sm font-medium text-text-muted hover:text-accent transition-colors"
+            >
+              Setlists
+            </button>
           </div>
         </div>
       </header>
 
-      <SongViewer song={song} isSaved={saved} onSaveToggle={() => setSaved(true)} />
+      <SongViewer
+        song={song}
+        isSaved={saved}
+        onSaveToggle={() => setSaved(true)}
+        initialState={initialState}
+      />
     </div>
   );
 }

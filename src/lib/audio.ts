@@ -12,7 +12,7 @@ function midiToFreq(midi: number): number {
 
 let sharedCtx: AudioContext | null = null;
 
-function getCtx(): AudioContext | null {
+export function getCtx(): AudioContext | null {
   if (typeof window === "undefined") return null;
   if (!sharedCtx) {
     const Ctor =
