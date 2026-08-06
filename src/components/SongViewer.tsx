@@ -1214,7 +1214,8 @@ export default function SongViewer({ song, isSaved, onSaveToggle, initialState }
                 viewMode,
                 handlePlayChord,
                 effectiveCapo,
-                activePlaybackLine ?? activeSyncLine,
+                activePlaybackLine,
+                activeSyncLine,
                 countdownLine
               )}
             </div>
@@ -1308,15 +1309,22 @@ function renderLine(
   onPlayChord: (fingering: ChordFingering) => void,
   capo: number | null,
   activePlaybackLine: number | null,
+  activeSyncLine: number | null,
   countdownLine: number | null
 ): React.ReactNode {
-  const isActive = activePlaybackLine === lineIdx;
+  // Playback highlight applies to all line types (chord + lyric).
+  // Sync highlight applies only to lyric lines — chord lines carry both
+  // chords and lyrics, and highlighting the whole line would wash out the
+  // chord tokens. The countdown highlight is strongest and applies to any
+  // line type (it marks the first chord to strum).
+  const isPlaybackActive = activePlaybackLine === lineIdx;
+  const isSyncActive = activeSyncLine === lineIdx;
   const isCountdown = countdownLine === lineIdx;
   // The countdown highlight is stronger so the first chord stands out while
   // the player gets ready to strum.
   const highlight = isCountdown
     ? "bg-accent/30 ring-2 ring-accent rounded px-1 -mx-1 animate-pulse"
-    : isActive
+    : isPlaybackActive
       ? "bg-accent/15 rounded px-1 -mx-1"
       : "";
 
@@ -1334,8 +1342,10 @@ function renderLine(
     case "lyric":
       // In chords-only mode, hide pure lyric lines.
       if (viewMode === "chords") return null;
+      // Sync highlight applies to lyric lines.
+      const lyricHighlight = highlight || (isSyncActive ? "bg-accent/15 rounded px-1 -mx-1" : "");
       return (
-        <div key={lineIdx} className={`text-text ${highlight}`}>
+        <div key={lineIdx} className={`text-text ${lyricHighlight}`}>
           {line.text}
         </div>
       );
@@ -1346,12 +1356,17 @@ function renderLine(
         const text = line.segments
           .map(seg => (seg.chord ? "" : seg.text))
           .join("");
+        // In lyrics mode, chord lines are effectively lyric lines —
+        // sync highlight applies.
+        const lyricModeHighlight = highlight || (isSyncActive ? "bg-accent/15 rounded px-1 -mx-1" : "");
         return (
-          <div key={lineIdx} className={`text-text ${highlight}`}>
+          <div key={lineIdx} className={`text-text ${lyricModeHighlight}`}>
             {text}
           </div>
         );
       }
+      // In chords/both mode, chord lines should NOT get the sync highlight
+      // (only playback and countdown highlights apply).
       return (
         <div key={lineIdx} className={`chord-line ${highlight}`}>
           {line.segments.map((seg, segIdx) => {
