@@ -1,14 +1,16 @@
-// In-memory sync session store.
+// MongoDB-backed sync session store.
 //
 // A sync session is created by the server-side user (authenticated) when
 // they open the /sync page. The session ID is embedded in the QR code.
 // The mobile app scans the QR, then uses the session ID to authenticate
 // its HTTP requests to the sync data endpoints.
 //
-// Sessions expire after 10 minutes. Storage is in-memory, so sessions
-// are lost on server restart — the user just refreshes the sync page.
-// This is fine for local-network sync (the server runs as a long-lived
-// process via `next dev` or `next start`).
+// Sessions are stored in MongoDB so they work on Vercel's serverless
+// platform (where in-memory storage doesn't persist between requests).
+// Sessions auto-expire after 10 minutes via a TTL index.
+
+import { getDb } from "../mongo";
+import { randomBytes } from "crypto";
 
 export type SyncSessionStatus = "waiting" | "syncing" | "completed";
 
@@ -22,64 +24,76 @@ export interface SyncSession {
 }
 
 const SESSION_TTL = 10 * 60 * 1000; // 10 minutes
+const COLLECTION = "syncSessions";
 
-// Map<sessionId, SyncSession>
-const sessions = new Map<string, SyncSession>();
-
-// Clean up expired sessions periodically.
-function cleanup() {
-  const now = Date.now();
-  for (const [id, session] of sessions) {
-    if (now > session.expiresAt) {
-      sessions.delete(id);
-    }
-  }
+async function ensureIndex() {
+  const db = await getDb();
+  // TTL index — MongoDB auto-deletes expired sessions.
+  await db.collection(COLLECTION).createIndex(
+    { expiresAt: 1 },
+    { expireAfterSeconds: 0 }
+  );
+  await db.collection(COLLECTION).createIndex(
+    { sessionId: 1 },
+    { unique: true }
+  );
 }
 
-export function createSession(userId: string): SyncSession {
-  cleanup();
-  const sessionId = generateSessionId();
+let indexEnsured = false;
+
+export async function createSession(userId: string): Promise<SyncSession> {
+  if (!indexEnsured) {
+    await ensureIndex();
+    indexEnsured = true;
+  }
+  const db = await getDb();
   const now = Date.now();
   const session: SyncSession = {
-    sessionId,
+    sessionId: generateSessionId(),
     userId,
     status: "waiting",
     result: null,
     createdAt: now,
     expiresAt: now + SESSION_TTL,
   };
-  sessions.set(sessionId, session);
+  await db.collection(COLLECTION).insertOne(session);
   return session;
 }
 
-export function getSession(sessionId: string): SyncSession | null {
-  const session = sessions.get(sessionId);
-  if (!session) return null;
-  if (Date.now() > session.expiresAt) {
-    sessions.delete(sessionId);
+export async function getSession(sessionId: string): Promise<SyncSession | null> {
+  const db = await getDb();
+  const doc = await db.collection(COLLECTION).findOne({ sessionId });
+  if (!doc) return null;
+  if (Date.now() > (doc.expiresAt as number)) {
+    await db.collection(COLLECTION).deleteOne({ sessionId });
     return null;
   }
-  return session;
+  return {
+    sessionId: doc.sessionId as string,
+    userId: doc.userId as string,
+    status: doc.status as SyncSessionStatus,
+    result: doc.result as SyncSession["result"],
+    createdAt: doc.createdAt as number,
+    expiresAt: doc.expiresAt as number,
+  };
 }
 
-export function updateSessionStatus(
+export async function updateSessionStatus(
   sessionId: string,
   status: SyncSessionStatus,
   result?: { added: number; updated: number; skipped: number }
-): void {
-  const session = sessions.get(sessionId);
-  if (!session) return;
-  session.status = status;
+): Promise<void> {
+  const db = await getDb();
+  const update: Record<string, unknown> = { status };
   if (result !== undefined) {
-    session.result = result;
+    update.result = result;
   }
+  await db.collection(COLLECTION).updateOne(
+    { sessionId },
+    { $set: update }
+  );
 }
 
 function generateSessionId(): string {
-  // 8-char hex ID — short enough for QR, enough entropy for local network.
-  const bytes = new Uint8Array(4);
-  crypto.getRandomValues(bytes);
-  return Array.from(bytes)
-    .map(b => b.toString(16).padStart(2, "0"))
-    .join("");
+  return randomBytes(4).toString("hex");
 }

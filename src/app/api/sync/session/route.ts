@@ -16,12 +16,12 @@ export async function POST(request: NextRequest) {
   if (authResult instanceof NextResponse) return authResult;
   const { userId } = authResult;
 
-  const session = createSession(userId);
+  const session = await createSession(userId);
   const localIp = getLocalIp();
 
-  // The URL the mobile should connect to. If we can detect a local IP,
-  // use it with the current request's port. Otherwise fall back to the
-  // request's origin (works for Vercel or direct access).
+  // The URL the mobile should connect to. If we can detect a local IP
+  // (running locally), use it with the current request's port. Otherwise
+  // fall back to the request's origin (works for Vercel or direct access).
   const port = request.nextUrl.port || (request.nextUrl.protocol === "https:" ? "443" : "80");
   const serverUrl = localIp
     ? `http://${localIp}:${port}`

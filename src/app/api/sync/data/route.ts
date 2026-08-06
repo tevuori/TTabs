@@ -34,17 +34,17 @@ function corsResponse(body: unknown, status = 200) {
   });
 }
 
-function requireSession(request: NextRequest): string | null {
+async function requireSession(request: NextRequest): Promise<string | null> {
   const session = request.nextUrl.searchParams.get("session");
   if (!session) return null;
-  const s = getSession(session);
+  const s = await getSession(session);
   if (!s) return null;
   return s.userId;
 }
 
 // GET — export all of the user's data as a SyncPayload
 export async function GET(request: NextRequest) {
-  const userId = requireSession(request);
+  const userId = await requireSession(request);
   if (!userId) {
     return corsResponse({ error: "Invalid or expired session" }, 401);
   }
@@ -72,7 +72,7 @@ export async function GET(request: NextRequest) {
 
 // POST — receive the mobile's SyncPayload and merge it into MongoDB
 export async function POST(request: NextRequest) {
-  const userId = requireSession(request);
+  const userId = await requireSession(request);
   if (!userId) {
     return corsResponse({ error: "Invalid or expired session" }, 401);
   }
@@ -84,7 +84,7 @@ export async function POST(request: NextRequest) {
     return corsResponse({ error: "Invalid JSON" }, 400);
   }
 
-  updateSessionStatus(request.nextUrl.searchParams.get("session")!, "syncing");
+  await updateSessionStatus(request.nextUrl.searchParams.get("session")!, "syncing");
 
   const db = await getDb();
   let added = 0;
@@ -149,7 +149,7 @@ export async function POST(request: NextRequest) {
   }
 
   const result = { added, updated, skipped };
-  updateSessionStatus(request.nextUrl.searchParams.get("session")!, "completed", result);
+  await updateSessionStatus(request.nextUrl.searchParams.get("session")!, "completed", result);
 
   return corsResponse(result);
 }
