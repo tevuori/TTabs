@@ -6,7 +6,6 @@ import {
   parseFrame,
   reassemble,
   decodePayload,
-  type Frame,
 } from "@/lib/sync/protocol";
 import type { SyncPayload } from "@/lib/storage/types";
 
@@ -25,6 +24,7 @@ export default function QRScanner({ onPayload, onProgress }: QRScannerProps) {
   const [error, setError] = useState<string | null>(null);
   const [collected, setCollected] = useState(0);
   const [total, setTotal] = useState(0);
+  const [missingIndices, setMissingIndices] = useState<number[]>([]);
 
   // Accumulated chunks for the current session.
   const chunksRef = useRef<Map<number, string>>(new Map());
@@ -33,10 +33,25 @@ export default function QRScanner({ onPayload, onProgress }: QRScannerProps) {
   const readerRef = useRef<BrowserMultiFormatReader | null>(null);
   const controlsRef = useRef<{ stop: () => void } | null>(null);
   const doneRef = useRef(false);
+  // Track the last decoded text + timestamp to deduplicate rapid re-decodes
+  // of the same frame (the scanner can fire multiple times per displayed QR).
+  const lastTextRef = useRef<string>("");
+  const lastTextTimeRef = useRef(0);
 
   const handleResult = useCallback(
     async (text: string) => {
       if (doneRef.current) return;
+
+      // Deduplicate: if the scanner reads the same QR text within 500ms,
+      // skip it. @zxing fires on every successful decode, which can be
+      // multiple times per second for the same static QR.
+      const now = Date.now();
+      if (text === lastTextRef.current && now - lastTextTimeRef.current < 500) {
+        return;
+      }
+      lastTextRef.current = text;
+      lastTextTimeRef.current = now;
+
       const frame = parseFrame(text);
       if (!frame) return;
 
@@ -47,6 +62,7 @@ export default function QRScanner({ onPayload, onProgress }: QRScannerProps) {
         totalRef.current = frame.totalChunks;
         setCollected(0);
         setTotal(frame.totalChunks);
+        setMissingIndices([]);
       } else if (!sessionIdRef.current) {
         sessionIdRef.current = frame.sessionId;
         totalRef.current = frame.totalChunks;
@@ -59,6 +75,13 @@ export default function QRScanner({ onPayload, onProgress }: QRScannerProps) {
         const newCount = chunksRef.current.size;
         setCollected(newCount);
         onProgress?.({ collected: newCount, total: totalRef.current });
+
+        // Update the missing-indices display.
+        const missing: number[] = [];
+        for (let i = 0; i < totalRef.current; i++) {
+          if (!chunksRef.current.has(i)) missing.push(i);
+        }
+        setMissingIndices(missing);
       }
 
       // Check if we have all chunks.
@@ -67,6 +90,7 @@ export default function QRScanner({ onPayload, onProgress }: QRScannerProps) {
         if (encoded) {
           doneRef.current = true;
           setStatus("done");
+          setMissingIndices([]);
           // Stop the camera.
           controlsRef.current?.stop();
           try {
@@ -90,8 +114,10 @@ export default function QRScanner({ onPayload, onProgress }: QRScannerProps) {
     chunksRef.current = new Map();
     sessionIdRef.current = null;
     totalRef.current = 0;
+    lastTextRef.current = "";
     setCollected(0);
     setTotal(0);
+    setMissingIndices([]);
 
     try {
       const reader = new BrowserMultiFormatReader();
@@ -200,6 +226,20 @@ export default function QRScanner({ onPayload, onProgress }: QRScannerProps) {
               style={{ width: `${(collected / total) * 100}%` }}
             />
           </div>
+          {/* Show which frames are still missing — helps diagnose scanning issues */}
+          {missingIndices.length > 0 && missingIndices.length <= 20 && (
+            <div className="mt-2 text-text-dim text-xs">
+              <span>Waiting for: </span>
+              <span className="font-mono text-text-muted">
+                {missingIndices.join(", ")}
+              </span>
+            </div>
+          )}
+          {missingIndices.length > 0 && missingIndices.length <= 10 && (
+            <div className="mt-1 text-text-dim text-[11px]">
+              Adjust camera angle or distance if progress stalls
+            </div>
+          )}
         </div>
       )}
 
@@ -218,6 +258,7 @@ export default function QRScanner({ onPayload, onProgress }: QRScannerProps) {
             setStatus("idle");
             setCollected(0);
             setTotal(0);
+            setMissingIndices([]);
           }}
           className="px-4 py-2 bg-bg-card hover:bg-bg-hover border border-bg-border rounded-xl text-text-muted text-sm transition-colors"
         >

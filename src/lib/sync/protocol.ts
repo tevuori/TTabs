@@ -20,7 +20,10 @@
 import type { SyncPayload } from "../storage/types";
 
 export const PROTOCOL_MARKER = "TT1";
-export const DEFAULT_CHUNK_SIZE = 700; // base64 chars per QR frame
+// Chunk size in base64 characters per QR frame. Smaller chunks produce
+// less-dense QR codes that scan far more reliably on phone cameras. 300
+// chars keeps each QR well within scannable density at 480px.
+export const DEFAULT_CHUNK_SIZE = 300;
 
 export interface Frame {
   sessionId: string;
