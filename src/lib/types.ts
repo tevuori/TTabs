@@ -53,6 +53,7 @@ export interface SongState {
   capoOverride: number | null;
   fontSize?: number; // tab content font size in px
   viewMode?: ViewMode; // which parts of the song to show
+  countInBeats?: number; // 4 or 8 — count-in length before sync/backing
   updatedAt: number;
 }
 

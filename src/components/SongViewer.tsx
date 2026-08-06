@@ -5,7 +5,7 @@ import { SongTab, ChordFingering, ParsedLine, SongState, ViewMode } from "@/lib/
 import { parseTabContent } from "@/lib/content-parser";
 import { transposeChord, shouldUseFlats } from "@/lib/chords";
 import { getChordFingerings, getChordShapes } from "@/lib/chord-shapes";
-import { playChord, unlockAudio } from "@/lib/audio";
+import { playChord, unlockAudio, getCtx } from "@/lib/audio";
 import { SongPlayer, extractPlaybackChords } from "@/lib/playback";
 import { BackingTrack, type BackingLayer } from "@/lib/backing-track";
 import { parseLrc, alignLyrics, lineAtTime, type LyricAlignment } from "@/lib/lyrics";
@@ -73,11 +73,13 @@ export default function SongViewer({ song, isSaved, onSaveToggle, initialState }
   const ytTimeRef = useRef<number | null>(null); // YouTube player time (master clock when available)
   const lineRefs = useRef<(HTMLDivElement | null)[]>([]);
 
-  // 5-second pre-sync countdown: scrolls to the first chord, highlights it,
-  // and shows a visible timer before synced-lyrics scroll begins.
-  const [syncCountdown, setSyncCountdown] = useState<number | null>(null);
+  // Tempo-synced count-in: scrolls to the first chord, highlights it,
+  // plays metronome clicks at the song's BPM, and shows 4 visual dots
+  // that light up on each beat before synced-lyrics scroll begins.
+  const [countdownBeat, setCountdownBeat] = useState<number | null>(null);
   const [countdownLine, setCountdownLine] = useState<number | null>(null);
-  // When true, the backing track should start when the countdown ends.
+  const [countInBeats, setCountInBeats] = useState(8); // 4 or 8
+  // When true, the backing track should start when the count-in ends.
   const backingPendingRef = useRef(false);
 
   // Load saved state on mount. URL-provided initialState (from a shared link)
@@ -91,6 +93,7 @@ export default function SongViewer({ song, isSaved, onSaveToggle, initialState }
           setCapoOverride(state.capoOverride ?? null);
           if (typeof state.fontSize === "number") setFontSize(state.fontSize);
           if (state.viewMode) setViewMode(state.viewMode);
+          if (typeof state.countInBeats === "number") setCountInBeats(state.countInBeats);
         }
         // Apply URL state last so it wins.
         if (initialState) {
@@ -116,10 +119,11 @@ export default function SongViewer({ song, isSaved, onSaveToggle, initialState }
       capoOverride,
       fontSize,
       viewMode,
+      countInBeats,
       updatedAt: Date.now(),
     };
     saveSongState(song.id, state);
-  }, [transposition, chordOverrides, capoOverride, fontSize, viewMode, stateLoaded, song.id]);
+  }, [transposition, chordOverrides, capoOverride, fontSize, viewMode, countInBeats, stateLoaded, song.id]);
 
   // Parse the tab content
   const parsedLines = useMemo(() => parseTabContent(song.content), [song.content]);
@@ -447,19 +451,37 @@ export default function SongViewer({ song, isSaved, onSaveToggle, initialState }
     setBackingPlaying(true);
   }, [parsedLines, getChordWithFingerings, playbackBpm, beatsPerChord, effectiveCapo, backingLayers]);
 
-  // Cancel any in-progress pre-sync countdown.
+  // Cancel any in-progress count-in.
   const cancelSyncCountdown = useCallback(() => {
-    setSyncCountdown(null);
+    setCountdownBeat(null);
     setCountdownLine(null);
   }, []);
 
-  // Toggle synced-lyrics scroll. Starting it runs a 5-second countdown first:
-  // the page jumps to the first chord (which may differ from the first lyric
-  // line), that chord is highlighted, and a visible timer counts down so the
-  // player can get ready. Clicking again during either the countdown or the
-  // sync itself stops everything.
+  // Play a single metronome click sound via the Web Audio API.
+  // Downbeat: higher pitch & louder. Off-beat: lower & softer.
+  const playClick = useCallback((isDownbeat: boolean) => {
+    const ctx = getCtx();
+    if (!ctx) return;
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    const time = ctx.currentTime;
+    osc.frequency.value = isDownbeat ? 1500 : 900;
+    gain.gain.setValueAtTime(0.0001, time);
+    gain.gain.exponentialRampToValueAtTime(isDownbeat ? 0.5 : 0.3, time + 0.001);
+    gain.gain.exponentialRampToValueAtTime(0.0001, time + 0.05);
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.start(time);
+    osc.stop(time + 0.06);
+  }, []);
+
+  // Toggle synced-lyrics scroll. Starting it runs a tempo-synced count-in
+  // first: the page jumps to the first chord (which may differ from the
+  // first lyric line), that chord is highlighted, and metronome clicks
+  // play at the song's BPM with 4 visual dots lighting up. Clicking again
+  // during either the count-in or the sync itself stops everything.
   const handleToggleSync = useCallback(() => {
-    if (syncScroll || syncCountdown !== null) {
+    if (syncScroll || countdownBeat !== null) {
       cancelSyncCountdown();
       stopBackingAndSync();
       return;
@@ -474,35 +496,38 @@ export default function SongViewer({ song, isSaved, onSaveToggle, initialState }
       }
       setCountdownLine(firstIdx);
     }
-    setSyncCountdown(5);
-  }, [syncScroll, syncCountdown, lyricsAlignments.length, firstChordLineIdx, cancelSyncCountdown, stopBackingAndSync]);
+    setCountdownBeat(0);
+  }, [syncScroll, countdownBeat, lyricsAlignments.length, firstChordLineIdx, cancelSyncCountdown, stopBackingAndSync]);
 
-  // Drive the pre-sync countdown. Each tick decrements by 1; once the final
-  // "1" is shown for a full second, the synced-lyrics scroll and/or backing
-  // track starts (depending on what triggered the countdown).
+  // Drive the tempo-synced count-in. On each beat: play a metronome click,
+  // then after one beat duration (60000/BPM ms) advance to the next beat.
+  // When the last beat finishes, start the synced-lyrics scroll and/or
+  // backing track (depending on what triggered the count-in).
   useEffect(() => {
-    if (syncCountdown === null) return;
-    if (syncCountdown <= 1) {
-      const id = setTimeout(() => {
+    if (countdownBeat === null) return;
+    const beatInterval = 60000 / playbackBpm;
+    // Downbeat = first beat of each bar (beat 0, and beat 4 in 8-beat mode).
+    const isDownbeat = countdownBeat % 4 === 0;
+    playClick(isDownbeat);
+
+    const id = setTimeout(() => {
+      if (countdownBeat >= countInBeats - 1) {
+        // Last beat finished — start sync scroll and/or backing track.
         setCountdownLine(null);
-        // Start synced-lyrics scroll if alignments are available.
         if (syncAlignmentsRef.current.length > 0) {
           setSyncScroll(true);
         }
-        // Start the backing track if the countdown was triggered by it.
         if (backingPendingRef.current) {
           backingPendingRef.current = false;
           startBackingTrack();
         }
-        setSyncCountdown(null);
-      }, 1000);
-      return () => clearTimeout(id);
-    }
-    const id = setTimeout(() => {
-      setSyncCountdown(c => (c === null ? null : c - 1));
-    }, 1000);
+        setCountdownBeat(null);
+      } else {
+        setCountdownBeat(b => (b === null ? null : b + 1));
+      }
+    }, beatInterval);
     return () => clearTimeout(id);
-  }, [syncCountdown, startBackingTrack]);
+  }, [countdownBeat, playbackBpm, countInBeats, playClick, startBackingTrack]);
 
   useEffect(() => {
     if (!syncScroll) {
@@ -681,25 +706,25 @@ export default function SongViewer({ song, isSaved, onSaveToggle, initialState }
   }, [playing, parsedLines, getChordWithFingerings, playbackBpm, beatsPerChord, effectiveCapo, stopPlayback, stopBackingAndSync]);
 
   const handleToggleBacking = useCallback(() => {
-    if (backingPlaying || syncCountdown !== null && backingPendingRef.current) {
-      // Stop everything if backing is playing or a backing countdown is active.
+    if (backingPlaying || countdownBeat !== null && backingPendingRef.current) {
+      // Stop everything if backing is playing or a backing count-in is active.
       stopBackingAndSync();
       return;
     }
-    if (syncCountdown !== null) {
-      // A sync-only countdown is running — cancel it and start a backing one.
+    if (countdownBeat !== null) {
+      // A sync-only count-in is running — cancel it and start a backing one.
       cancelSyncCountdown();
     }
     // Mutual exclusion: stop song playback if it's running.
     stopPlayback();
-    // Verify we have chords to play before starting the countdown.
+    // Verify we have chords to play before starting the count-in.
     const chords = extractPlaybackChords(parsedLines, (chordName) => {
       const { displayName, fingerings } = getChordWithFingerings(chordName);
       return { name: displayName, fingerings };
     });
     if (chords.length === 0) return;
     unlockAudio();
-    // Start the 5s countdown: scroll to first chord, highlight it, show timer.
+    // Start the count-in: scroll to first chord, highlight it, play clicks.
     const firstIdx = firstChordLineIdx;
     if (firstIdx !== null) {
       const el = lineRefs.current[firstIdx];
@@ -707,8 +732,8 @@ export default function SongViewer({ song, isSaved, onSaveToggle, initialState }
       setCountdownLine(firstIdx);
     }
     backingPendingRef.current = true;
-    setSyncCountdown(5);
-  }, [backingPlaying, syncCountdown, parsedLines, getChordWithFingerings, firstChordLineIdx, stopBackingAndSync, cancelSyncCountdown, stopPlayback]);
+    setCountdownBeat(0);
+  }, [backingPlaying, countdownBeat, parsedLines, getChordWithFingerings, firstChordLineIdx, stopBackingAndSync, cancelSyncCountdown, stopPlayback]);
 
   // Toggle a single backing layer on/off. Updates the engine live if running.
   const handleToggleLayer = useCallback((layer: BackingLayer) => {
@@ -936,18 +961,18 @@ export default function SongViewer({ song, isSaved, onSaveToggle, initialState }
               <button
                 onClick={handleToggleSync}
                 className={`w-8 h-8 flex items-center justify-center rounded-lg transition-colors ${
-                  syncScroll || syncCountdown !== null
+                  syncScroll || countdownBeat !== null
                     ? "bg-accent text-white"
                     : "bg-bg-hover hover:bg-bg-border text-text"
                 }`}
-                title={syncScroll ? "Stop synced scroll" : syncCountdown !== null ? "Cancel countdown" : "Scroll synced to lyrics"}
+                title={syncScroll ? "Stop synced scroll" : countdownBeat !== null ? "Cancel count-in" : "Scroll synced to lyrics"}
               >
                 <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
                   <path d="M2 7H4L5 4L7 10L9 5L10 7H12" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
                 </svg>
               </button>
               <span className="text-text-muted text-xs">
-                {syncCountdown !== null ? `Starting in ${syncCountdown}s` : "Sync"}
+                {countdownBeat !== null ? "Counting in…" : "Sync"}
               </span>
               {ytClockActive && (
                 <span className="text-accent text-[10px] font-medium" title="Synced to YouTube playback">
@@ -1002,6 +1027,20 @@ export default function SongViewer({ song, isSaved, onSaveToggle, initialState }
               {lyricsStatus === "error" && <span>Lyrics unavailable</span>}
             </div>
           )}
+
+          {/* Count-in length toggle: 1 bar (4 beats) or 2 bars (8 beats) */}
+          <button
+            onClick={() => setCountInBeats(b => (b === 4 ? 8 : 4))}
+            className="flex items-center gap-1.5 px-2.5 py-1.5 bg-bg-card hover:bg-bg-hover border border-bg-border rounded-xl text-text-muted text-xs font-medium transition-colors"
+            title={`Count-in: ${countInBeats === 4 ? "1 bar" : "2 bars"} (${countInBeats} beats). Click to switch.`}
+          >
+            <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+              <circle cx="3" cy="6" r="1.5" fill="currentColor" />
+              <circle cx="9" cy="6" r="1.5" fill="currentColor" />
+              <path d="M4.5 6H7.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+            </svg>
+            {countInBeats === 4 ? "1 bar" : "2 bars"}
+          </button>
 
           {/* Song playback */}
           <div className="flex items-center gap-2 bg-bg-card border border-bg-border rounded-xl p-1.5">
@@ -1060,13 +1099,13 @@ export default function SongViewer({ song, isSaved, onSaveToggle, initialState }
             <button
               onClick={handleToggleBacking}
               className={`w-8 h-8 flex items-center justify-center rounded-lg transition-colors ${
-                backingPlaying || (syncCountdown !== null && backingPendingRef.current)
+                backingPlaying || (countdownBeat !== null && backingPendingRef.current)
                   ? "bg-accent text-white"
                   : "bg-bg-hover hover:bg-bg-border text-text"
               }`}
-              title={backingPlaying ? "Stop backing track + sync" : "Play backing track with synced scroll (5s countdown)"}
+              title={backingPlaying ? "Stop backing track + sync" : "Play backing track with count-in + synced scroll"}
             >
-              {backingPlaying || (syncCountdown !== null && backingPendingRef.current) ? (
+              {backingPlaying || (countdownBeat !== null && backingPendingRef.current) ? (
                 <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor">
                   <rect x="2" y="2" width="3" height="8" rx="1" />
                   <rect x="7" y="2" width="3" height="8" rx="1" />
@@ -1235,11 +1274,27 @@ export default function SongViewer({ song, isSaved, onSaveToggle, initialState }
         )}
       </div>
 
-      {/* Pre-sync countdown overlay — visible during the 5s get-ready window */}
-      {syncCountdown !== null && (
+      {/* Count-in overlay — visible during the tempo-synced count-in */}
+      {countdownBeat !== null && (
         <div className="fixed bottom-20 right-3 sm:right-4 z-50 flex items-center gap-2 sm:gap-3 bg-bg-card border border-accent rounded-full shadow-2xl pl-3 pr-1 py-1 print:hidden">
-          <div className="flex items-center justify-center w-9 h-9 rounded-full bg-accent text-white font-bold text-lg leading-none">
-            {syncCountdown}
+          {/* 4 dots that light up on each beat; reset on the second bar */}
+          <div className="flex items-center gap-1.5">
+            {[0, 1, 2, 3].map(dot => {
+              const beatInBar = countdownBeat % 4;
+              const isActive = dot <= beatInBar;
+              return (
+                <span
+                  key={dot}
+                  className={`w-2.5 h-2.5 rounded-full transition-colors ${
+                    isActive ? "bg-accent" : "bg-bg-border"
+                  }`}
+                />
+              );
+            })}
+          </div>
+          {/* Current beat number (1–4) */}
+          <div className="flex items-center justify-center w-7 h-7 rounded-full bg-accent text-white font-bold text-sm leading-none">
+            {(countdownBeat % 4) + 1}
           </div>
           <div className="flex flex-col items-start leading-none">
             <span className="text-text text-xs font-semibold">Get ready</span>
