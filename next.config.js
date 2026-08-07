@@ -9,9 +9,11 @@ const nextConfig = {
   output: isMobile ? "export" : undefined,
   // Static export requires unoptimized images (no server-side optimizer).
   images: isMobile ? { unoptimized: true } : undefined,
-  // Trailing slashes make the static export's file structure match the
-  // routes Capacitor serves from the local asset folder.
-  trailingSlash: isMobile,
+  // No trailing slashes — in Capacitor's WebView, trailing slashes cause
+  // the WebView to look for /song/id/index.html which doesn't exist for
+  // dynamic routes. Without trailing slashes, Next.js client-side routing
+  // handles navigation entirely in JavaScript.
+  trailingSlash: false,
   experimental: {
     serverActions: {
       bodySizeLimit: "5mb",
