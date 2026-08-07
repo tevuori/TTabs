@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { SearchResult, Provider, SongTab } from "@/lib/types";
 import SearchBar from "@/components/SearchBar";
@@ -143,10 +143,42 @@ function ServerHome() {
   );
 }
 
-// --- Mobile home: offline, sync-focused ---
+// --- Mobile home: shows on first launch, then redirects to /library ---
+
+const SETUP_FLAG_KEY = "ttabs-mobile-setup-done";
 
 function MobileHome() {
   const router = useRouter();
+  const [checked, setChecked] = useState(false);
+
+  useEffect(() => {
+    // If the user has already set up (synced or dismissed), go to library.
+    // This makes the home page only show on first install.
+    if (typeof window !== "undefined" && localStorage.getItem(SETUP_FLAG_KEY)) {
+      router.replace("/library");
+    } else {
+      setChecked(true);
+    }
+  }, [router]);
+
+  if (!checked) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="w-8 h-8 border-2 border-bg-border border-t-accent rounded-full animate-spin" />
+      </div>
+    );
+  }
+
+  const goToLibrary = () => {
+    // Mark setup as done so future launches skip the home page.
+    localStorage.setItem(SETUP_FLAG_KEY, "1");
+    router.push("/library");
+  };
+
+  const goToSync = () => {
+    localStorage.setItem(SETUP_FLAG_KEY, "1");
+    router.push("/sync");
+  };
 
   return (
     <div className="min-h-screen flex flex-col">
@@ -165,7 +197,7 @@ function MobileHome() {
         {/* Sync CTA */}
         <div className="w-full max-w-md mb-8">
           <button
-            onClick={() => router.push("/sync")}
+            onClick={goToSync}
             className="w-full p-6 bg-bg-card border border-bg-border rounded-2xl hover:border-accent transition-colors text-left"
           >
             <div className="flex items-center gap-4">
@@ -177,7 +209,7 @@ function MobileHome() {
               <div>
                 <div className="text-text font-semibold text-base">Sync data</div>
                 <div className="text-text-muted text-sm">
-                  Transfer songs &amp; setlists via QR code
+                  Transfer songs &amp; setlists from your computer
                 </div>
               </div>
             </div>
@@ -187,7 +219,7 @@ function MobileHome() {
         {/* Library shortcut */}
         <div className="w-full max-w-md mb-4">
           <button
-            onClick={() => router.push("/library")}
+            onClick={goToLibrary}
             className="w-full p-5 bg-bg-card border border-bg-border rounded-2xl hover:border-accent transition-colors text-left"
           >
             <div className="flex items-center gap-4">
@@ -202,11 +234,6 @@ function MobileHome() {
               </div>
             </div>
           </button>
-        </div>
-
-        {/* Recent songs */}
-        <div className="w-full">
-          <RecentSongs />
         </div>
       </main>
 

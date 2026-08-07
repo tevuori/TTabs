@@ -6,6 +6,7 @@ import { SongTab, SongState } from "@/lib/types";
 import { getSong, isSongSaved, saveSong, deleteSong } from "@/lib/storage";
 import { addRecentSong } from "@/lib/recent";
 import { decodeStateFromQuery } from "@/lib/share";
+import { IS_MOBILE } from "@/lib/app-mode";
 import SongViewer from "@/components/SongViewer";
 import Header from "@/components/Header";
 import { AuthGuard } from "@/components/AuthGuard";
@@ -28,14 +29,21 @@ export default function SongPageClient({ params }: { params: Promise<{ id: strin
   useEffect(() => {
     async function loadSong() {
       // First check if it's a saved song
-      const savedSong = await getSong(id).catch(() => undefined);
+      console.log("[SongPage] Loading song, id:", id);
+      const savedSong = await getSong(id).catch((e) => {
+        console.error("[SongPage] getSong error:", e);
+        return undefined;
+      });
       if (savedSong) {
+        console.log("[SongPage] Found saved song:", savedSong.songName);
         setSong(savedSong);
         setSaved(true);
         setLoading(false);
         addRecentSong(savedSong);
         return;
       }
+
+      console.log("[SongPage] Song not found in storage, checking sessionStorage");
 
       // Otherwise check sessionStorage (from search flow)
       const tabJson = sessionStorage.getItem("currentTab");
@@ -56,6 +64,7 @@ export default function SongPageClient({ params }: { params: Promise<{ id: strin
         }
       }
 
+      console.error("[SongPage] Song not found, id:", id);
       setError("Song not found. Try searching for it again.");
       setLoading(false);
     }
@@ -86,10 +95,10 @@ export default function SongPageClient({ params }: { params: Promise<{ id: strin
       <div className="min-h-screen flex flex-col items-center justify-center gap-4">
         <p className="text-text-muted">{error || "Song not found"}</p>
         <button
-          onClick={() => router.push("/")}
+          onClick={() => router.push(IS_MOBILE ? "/library" : "/")}
           className="px-4 py-2 bg-accent hover:bg-accent-hover text-white rounded-lg text-sm font-medium"
         >
-          Back to Search
+          {IS_MOBILE ? "Back to Library" : "Back to Search"}
         </button>
       </div>
     );

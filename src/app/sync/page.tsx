@@ -300,6 +300,11 @@ function MobileSync() {
       });
 
       setPhase("done");
+      // Mark setup as done so the home page redirects to /library on
+      // future launches.
+      if (typeof window !== "undefined") {
+        localStorage.setItem("ttabs-mobile-setup-done", "1");
+      }
     } catch (e) {
       if ((e as Error).message !== "Aborted") {
         setError((e as Error).message);

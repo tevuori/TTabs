@@ -7,6 +7,7 @@ import Header from "@/components/Header";
 import { getAllSongs, deleteSong } from "@/lib/storage";
 import { BEGINNER_CHORDS, songUsesOnlyKnownChords } from "@/lib/chords";
 import { AuthGuard } from "@/components/AuthGuard";
+import { IS_MOBILE } from "@/lib/app-mode";
 
 export default function LibraryPage() {
   const router = useRouter();
@@ -181,13 +182,15 @@ export default function LibraryPage() {
                 </div>
                 <h2 className="text-text font-semibold text-lg mb-2">No saved songs yet</h2>
                 <p className="text-text-muted text-sm mb-4">
-                  Search for songs and save them to your library
+                  {IS_MOBILE
+                    ? "Sync data from your computer to get started"
+                    : "Search for songs and save them to your library"}
                 </p>
                 <button
-                  onClick={() => router.push("/")}
+                  onClick={() => router.push(IS_MOBILE ? "/sync" : "/")}
                   className="px-4 py-2 bg-accent hover:bg-accent-hover text-white rounded-lg text-sm font-medium"
                 >
-                  Search Songs
+                  {IS_MOBILE ? "Sync Data" : "Search Songs"}
                 </button>
               </>
             ) : (

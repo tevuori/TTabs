@@ -20,9 +20,9 @@ const SERVER_NAV_ITEMS: NavItem[] = [
 ];
 
 // Mobile mode: no Search (offline), no Settings (no user management).
-// Sync is the primary way to get data onto the device.
+// No Home — the home page redirects to /library after first setup.
+// Sync is accessible from the menu.
 const MOBILE_NAV_ITEMS: NavItem[] = [
-  { label: "Home", href: "/" },
   { label: "Library", href: "/library" },
   { label: "Chords", href: "/chords" },
   { label: "Capo", href: "/capo" },
